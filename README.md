@@ -55,14 +55,14 @@ Registry installs use the revision approved for the listing. Direct GitHub insta
 
 ## Release
 
-Update the version in `package.json` and `package-lock.json`, commit it, then push a matching tag. The workflow typechecks and tests the plugin, then creates a GitHub Release with generated notes:
+Update the version in `package.json` and `package-lock.json` in your PR. After the PR merges into `main`, the workflow typechecks and tests the plugin, then creates a GitHub Release tagged `v<version>` with generated notes:
 
 ```sh
-git tag v0.1.1
-git push origin v0.1.1
+# Example: bump 0.1.0 to 0.1.1 before merging
+npm version patch --no-git-tag-version
 ```
 
-To update the Paseo Registry listing, submit the new GitHub tag as a revision through the [plugin submission form](https://github.com/getpaseo/plugins/issues/new?template=submit-plugin.yml). Registry updates are reviewed before users receive the new revision.
+Each version is released once. To update the Paseo Registry listing, submit the new GitHub tag as a revision through the [plugin submission form](https://github.com/getpaseo/plugins/issues/new?template=submit-plugin.yml). Registry updates are reviewed before users receive the new revision.
 
 ## Limitations
 

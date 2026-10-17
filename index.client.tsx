@@ -4,11 +4,12 @@ import { copyText, useToast, type ToastApi } from "@getpaseo/plugin/client/react
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { Dashboard } from "./client/dashboard";
+import { clearImageCache } from "./client/images";
 import { hideableKind, imageData, turnMarkdown, imagesSchema, noticeData, noticeSchema, planSchema, stepsSchema, thoughtSchema, todoData, todoSchema, toolData, toolSchema } from "./client/model";
 import { followAgent, isTodo, onStaleSteps, onUnplacedStep, placeStep, resetMade, setStepSkip, stepKey, type Phase } from "./client/steps";
 import { currentPrefs, savePrefs, setPrefs, subscribePrefs, usePrefsSaver } from "./client/prefs";
 import { bindThemeRegistry, currentTheme, registerTheme } from "./client/theme-registry";
-import { bindPromptKeys, clampUserMessages, jumpToPrompt, openAgentIds, paintSidebar, setCompactHandler, readHostAppearance, restyleNative, selectionCopyMenu, setNativeColors, setRailProviders, setRichText, squircleCards, watchDom } from "./client/web";
+import { bindPromptKeys, clampUserMessages, jumpToPrompt, openAgentIds, paintSidebar, setCompactHandler, readHostAppearance, restyleNative, selectionCopyMenu, setNativeColors, setRailProviders, setRichText, stylePluginViews, watchDom } from "./client/web";
 import { getTheme, THEME_CATALOG_ID, themeSchema } from "./shared/theme";
 import { getPrefs, type Prefs } from "./shared/timeline";
 import { ImagesItem, NoticeItem, PlanItem, RecapItem, StepsItem, ThoughtItem, TodoItem, ToolItem } from "./client/views";
@@ -46,7 +47,7 @@ export default function contribute(client: PluginClientContext) {
   });
 
   const unrestyle = restyleNative(() => currentPrefs().nativeStyle === "design");
-  const unsquircleCards = squircleCards();
+  const unstylePluginViews = stylePluginViews();
   const unclamp = clampUserMessages(() => currentPrefs().userMessages === "clamp");
   const unselect = selectionCopyMenu(() => currentPrefs().selectionCopy === "on");
 
@@ -267,6 +268,7 @@ export default function contribute(client: PluginClientContext) {
   client.addScreen({ id: "dashboard", title: "Chat Polish", Component: Dashboard });
   client.addSidebarHeaderItem({ id: "dashboard", title: "Chat Polish", Component: DashboardItem });
   return () => {
+    clearImageCache();
     unsetCompact();
     unsubscribeToggles();
     removeToggles.forEach((r) => void r());
@@ -281,7 +283,7 @@ export default function contribute(client: PluginClientContext) {
     unselect();
     unsubscribeProviders();
     unrestyle();
-    unsquircleCards();
+    unstylePluginViews();
     unbindTheme();
   };
 }

@@ -28,6 +28,8 @@ export const prefsSchema = z.object({
   toolDetails: z.enum(["collapsed", "failed", "expanded"]).default("collapsed"),
   /** When the shell command in a row title is colored. */
   commandColors: z.enum(["expanded", "always"]).default("expanded"),
+  /** Wrap long diff lines to the viewport, or keep them on one line with horizontal scrolling. */
+  diffWrap: z.enum(["on", "off"]).default("off"),
   /** Completed tool calls left out of the timeline; running and failed calls always show. */
   hidden: z.array(z.enum(HIDEABLE)).default([]),
   /** Long user messages: clamped to six lines with a fade (desktop), or shown in full. */

@@ -27,8 +27,10 @@
     "shared/"
   ],
   "scripts": {
+    "pretypecheck": "node server/prepare-image.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/model.test.mjs"
+    "pretest": "node server/prepare-image.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.11.2",
@@ -40,6 +42,7 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@getpaseo/protocol": "0.11.2"
+    "@getpaseo/protocol": "0.11.2",
+    "sharp": "0.35.5"
   }
 }

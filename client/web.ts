@@ -5,6 +5,7 @@ import { guardPositional, POSITIONAL, splitTop } from "./css-guard";
 declare const localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void };
 declare const location: { reload(): void };
 interface DomElement {
+  isConnected: boolean;
   parentElement: DomElement | null;
   firstElementChild: DomElement | null;
   lastElementChild: DomElement | null;
@@ -14,7 +15,7 @@ interface DomElement {
   textContent: string | null;
   querySelector(selector: string): DomElement | null;
   querySelectorAll(selector: string): ArrayLike<DomElement>;
-  style: { setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): void };
+  style: { getPropertyValue(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): void };
   getAttribute(name: string): string | null;
   setAttribute(name: string, value: string): void;
   hasAttribute(name: string): boolean;
@@ -22,8 +23,8 @@ interface DomElement {
   closest(selector: string): DomElement | null;
   tagName: string;
   removeAttribute(name: string): void;
-  addEventListener(type: "click" | "mouseover" | "mouseleave", listener: (event: { target: unknown }) => void, capture?: boolean): void;
-  removeEventListener(type: "click" | "mouseover" | "mouseleave", listener: (event: { target: unknown }) => void, capture?: boolean): void;
+  addEventListener(type: "click" | "mouseover" | "mouseleave" | "wheel" | "touchstart" | "pointerdown", listener: (event: { target: unknown }) => void, capture?: boolean): void;
+  removeEventListener(type: "click" | "mouseover" | "mouseleave" | "wheel" | "touchstart" | "pointerdown", listener: (event: { target: unknown }) => void, capture?: boolean): void;
   remove(): void;
   // Used by the model selector.
   children: ArrayLike<DomElement>;
@@ -82,11 +83,17 @@ declare function getComputedStyle(el: DomElement): {
   position: string;
   zIndex: string;
   boxShadow: string;
+  overflowAnchor: string;
 };
+declare class ResizeObserver {
+  constructor(cb: () => void);
+  observe(target: DomElement): void;
+  disconnect(): void;
+}
 declare function getSelection(): { toString(): string } | null;
 declare class MutationObserver {
-  constructor(cb: (records: Array<{ addedNodes: ArrayLike<unknown>; target?: unknown; attributeName?: string | null }>) => void);
-  observe(target: unknown, options: { childList: boolean; subtree: boolean; attributes?: boolean; attributeFilter?: string[] }): void;
+  constructor(cb: (records: Array<{ addedNodes: ArrayLike<unknown>; removedNodes: ArrayLike<unknown>; target: unknown; attributeName?: string | null; type: string }>) => void);
+  observe(target: unknown, options: { childList: boolean; subtree: boolean; characterData?: boolean; attributes?: boolean; attributeFilter?: string[] }): void;
   disconnect(): void;
 }
 
@@ -194,21 +201,35 @@ export function readSyntaxTheme(): string | undefined {
 /** Elements matching `selector` within the added roots, the roots themselves included. */
 const within = (roots: DomElement[], selector: string) => roots.flatMap((root) => [...(root.matches(selector) ? [root] : []), ...Array.from(root.querySelectorAll(selector))]);
 
+/** Process an added subtree once, even when a mutation batch lists its descendants too. */
+function distinctRoots(roots: Iterable<DomElement>): DomElement[] {
+  const all = new Set(roots);
+  return [...all].filter((root) => {
+    if (!root.isConnected) return false;
+    for (let parent = root.parentElement; parent; parent = parent.parentElement) if (all.has(parent)) return false;
+    return true;
+  });
+}
+
 interface DomWatcher {
   /** Runs before the browser paints, with the elements just added (initially the whole body), so restyled parts never flash. */
   added?: (roots: DomElement[]) => void;
   /** Runs at most every 250ms once mutations settle (they stream in while agents run). */
-  settled?: () => void;
+  settled?: (textRoots: DomElement[]) => void;
+  removed?: () => void;
 }
 
 // One observer for every watcher: Paseo mutates the DOM on each streamed token.
 const watchers = new Set<DomWatcher>();
 let observer: MutationObserver | undefined;
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
+const textRoots = new Set<DomElement>();
 
 function settle() {
   settleTimer = undefined;
-  for (const w of watchers) w.settled?.();
+  const roots = distinctRoots(textRoots);
+  textRoots.clear();
+  for (const w of watchers) w.settled?.(roots);
 }
 
 /**
@@ -221,20 +242,29 @@ export function watchDom(watcher: DomWatcher, cleanup: () => void) {
   if (!observer) {
     observer = new MutationObserver((records) => {
       const roots: DomElement[] = [];
+      const settings = records.some((r) => r.attributeName) && document.querySelector(SETTINGS_PANE);
+      let removed = false;
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) if ((node as { nodeType?: number }).nodeType === 1) roots.push(node as DomElement);
-        if (record.attributeName && record.target && document.querySelector(SETTINGS_PANE)) {
-          const target = record.target as DomElement;
+        removed ||= record.removedNodes.length > 0;
+        const node = record.target as { nodeType: number; parentElement: DomElement | null };
+        const target = node.nodeType === 1 ? record.target as DomElement : node.parentElement;
+        if (!target) continue;
+        // Text mutations need only revisit their own markdown subtree, rather than every historical reply.
+        if (!record.attributeName && target.closest(MSG)) textRoots.add(target);
+        if (record.attributeName && settings) {
           if (target.closest(SETTINGS_PANE) || getComputedStyle(target).position === "absolute" || getComputedStyle(target).position === "fixed") roots.push(target);
         }
       }
-      if (roots.length) for (const w of watchers) w.added?.(roots);
+      const added = distinctRoots(roots);
+      if (added.length) for (const w of watchers) w.added?.(added);
+      if (removed) for (const w of watchers) w.removed?.();
       settleTimer ??= setTimeout(settle, 250);
     });
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "aria-hidden", "aria-expanded", "data-state"] });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden", "aria-hidden", "aria-expanded", "data-state"] });
   }
   watcher.added?.([document.body as DomElement]);
-  watcher.settled?.();
+  watcher.settled?.([]);
   return () => {
     watchers.delete(watcher);
     if (!watchers.size) {
@@ -242,6 +272,7 @@ export function watchDom(watcher: DomWatcher, cleanup: () => void) {
       observer = undefined;
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = undefined;
+      textRoots.clear();
     }
     cleanup();
   };
@@ -397,6 +428,13 @@ export function clampUserMessages(enabled: () => boolean) {
     }
     bound.clear();
   };
+  const prune = () => {
+    for (const [bubble, onClick] of bound) if (!bubble.isConnected) {
+      bubble.removeEventListener("click", onClick);
+      bubble.removeAttribute(CLAMP);
+      bound.delete(bubble);
+    }
+  };
   return watchDom({ added: (roots) => {
       if (!enabled()) return release();
       if (!style) {
@@ -404,7 +442,7 @@ export function clampUserMessages(enabled: () => boolean) {
         style.textContent = CLAMP_CSS;
         document.head.appendChild(style);
       }
-      for (const [bubble] of bound) if (!bubble.parentElement) bound.delete(bubble);
+      prune();
       for (const message of within(roots, '[data-testid="user-message"]')) {
         const bubble = message.firstElementChild?.firstElementChild;
         const text = bubble?.lastElementChild;
@@ -423,7 +461,7 @@ export function clampUserMessages(enabled: () => boolean) {
         bubble.addEventListener("click", onClick);
         bound.set(bubble, onClick);
       }
-    } },
+    }, removed: prune },
     () => {
       release();
       style?.remove();
@@ -994,13 +1032,42 @@ const PARTS: Array<[string, (el: DomElement) => DomElement | null | undefined, s
 const SETTINGS_PANE = '[data-testid="settings-detail-pane"]';
 const CLEAR = "rgba(0, 0, 0, 0)";
 
-/** Squircle the plugin's own surfaced cards in browsers that support it; native clients keep their fallback radius. */
-export function squircleCards() {
+/** Browser-only card shapes and hover transitions; native clients keep their fallback styles. */
+export function stylePluginViews() {
   if (Platform.OS !== "web" || typeof document === "undefined") return () => {};
   const style = document.createElement("style");
-  style.textContent = '@supports (corner-shape: squircle) { [data-cp-squircle="card"] { border-radius: 28px !important; corner-shape: squircle; } }';
+  style.textContent = `
+@supports (corner-shape: squircle) { [data-cp-squircle="card"] { border-radius: 28px !important; corner-shape: squircle; } }
+[data-cp-row], ${ROW} > button { transition: opacity 80ms ease-out, background-color 80ms ease-out; }
+[data-cp-row] [dir], ${ROW} [data-cp-part="row-label"] > [dir] { transition: color 80ms ease-out; }
+/* One scroller for both axes keeps the horizontal bar visible with tall diffs. */
+[data-cp-nowrap] { overflow: auto !important; }
+[data-cp-nowrap] > div { width: max-content; min-width: 100%; }
+[data-cp-nowrap] [data-pmono] { white-space: pre !important; overflow-wrap: normal !important; }
+/* A shared light sweep preserves the action/target colors and works when row icons are hidden. */
+[data-cp-running-label] {
+  --cp-running-mask: linear-gradient(100deg, rgb(0 0 0 / 0.82) 35%, #000 50%, rgb(0 0 0 / 0.82) 65%);
+  -webkit-mask-image: var(--cp-running-mask); mask-image: var(--cp-running-mask);
+  -webkit-mask-size: 250% 100%; mask-size: 250% 100%;
+  animation: cp-running-label 1.8s linear infinite;
+}
+@keyframes cp-running-label {
+  from { -webkit-mask-position: 150% 0; mask-position: 150% 0; }
+  to { -webkit-mask-position: -50% 0; mask-position: -50% 0; }
+}
+/* Animate the grid track instead of guessing a max-height; long and streaming output keep their natural size. */
+[data-cp-expand] { display: grid !important; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 100ms cubic-bezier(0.23, 1, 0.32, 1), opacity 100ms ease-out; }
+[data-cp-expand="closed"] { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+@starting-style {
+  [data-cp-expand="open"] { grid-template-rows: 0fr; opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-cp-running-label] { animation: none; -webkit-mask-image: none; mask-image: none; }
+  [data-cp-expand] { transition: none; }
+  [data-cp-row], [data-cp-row] [dir], ${ROW} > button, ${ROW} [data-cp-part="row-label"] > [dir] { transition: none; }
+}`;
   document.head.appendChild(style);
-  return () => style.remove();
+  return () => { stopExpansionFollow?.(); style.remove(); };
 }
 
 /**
@@ -1040,10 +1107,13 @@ function tagSettings(roots: DomElement[]) {
       } else if (el.getAttribute("role") === "alert" || (border && radius >= 8 && height >= 44)) el.setAttribute("data-cp-set", "card");
     }
 
-  // Settings popovers may be portaled outside the pane and may not expose a menu/listbox role. Mark every visible floating
-  // surface while Settings is mounted, including semantic popups that were already tagged by another pass.
+  // Portaled popovers may omit menu/listbox roles. Inspect changed subtrees and their ancestors, not the whole app.
   if (document.querySelector(SETTINGS_PANE))
-    for (const el of Array.from(document.querySelectorAll("*"))) {
+    for (const el of new Set(roots.flatMap((root) => {
+      const ancestors: DomElement[] = [];
+      for (let parent = root.parentElement; parent && parent !== document.body; parent = parent.parentElement) ancestors.push(parent);
+      return [root, ...Array.from(root.querySelectorAll("*")), ...ancestors];
+    }))) {
       if (el.hasAttribute("data-cp-setting-menu") || (el.hasAttribute("data-cp-part") && !el.matches(SURFACE)) || el.tagName === "BUTTON" || el.getAttribute("role") === "button") continue;
       const style = getComputedStyle(el);
       if (style.position !== "absolute" && style.position !== "fixed") continue;
@@ -1118,7 +1188,7 @@ function tagParts(roots: DomElement[]) {
 
 // Paseo loads the card's account section (usage-report-*) after it opens, so the card grows by ~170px and jumps up a
 // frame later. Remember its full height per agent and open at that height next time.
-// Kept across reloads so even the first open after a restart has its height; trimmed to the last 50 agents.
+// The min-height is only a loading placeholder: once usage arrives the card sizes naturally, including when it shrinks.
 const HEIGHTS_KEY = "chat-polish:context-card-heights";
 let cardHeights: Map<string, number> | undefined;
 function keepCardHeight(card: DomElement) {
@@ -1126,18 +1196,18 @@ function keepCardHeight(card: DomElement) {
   cardHeights ??= new Map(Object.entries(JSON.parse(localStorage.getItem(HEIGHTS_KEY) ?? "{}") as Record<string, number>));
   const id = activeAgentId() ?? "";
   if (card.querySelector('[data-testid^="usage-report-"]')) {
-    // Drop the previous placeholder before measuring. Otherwise a cached min-height masks shorter content,
-    // and the cache can only ever grow even after the context card's contents shrink.
-    card.style.removeProperty("min-height");
+    if (card.style.getPropertyValue("min-height")) card.style.removeProperty("min-height");
     const height = Math.round(card.getBoundingClientRect().height);
     if (height > 0 && height !== cardHeights.get(id)) {
       cardHeights.delete(id);
       cardHeights.set(id, height);
-      localStorage.setItem(HEIGHTS_KEY, JSON.stringify(Object.fromEntries([...cardHeights].slice(-50))));
+      if (cardHeights.size > 50) cardHeights.delete(cardHeights.keys().next().value!);
+      localStorage.setItem(HEIGHTS_KEY, JSON.stringify(Object.fromEntries(cardHeights)));
     }
+    return;
   }
   const height = cardHeights.get(id);
-  if (height) card.style.setProperty("min-height", `${height}px`);
+  if (height && card.style.getPropertyValue("min-height") !== `${height}px`) card.style.setProperty("min-height", `${height}px`);
 }
 
 // ---- Compact from the context card ----
@@ -1376,11 +1446,10 @@ export function restyleNative(enabled: () => boolean) {
       decoratePopovers(roots);
       markLitRows(roots);
     },
-    settled: () => {
+    settled: (roots) => {
       if (!style) return;
       noteThinkingFallback();
-      // Streamed text lands in nodes tagged earlier; catch callout markers, task boxes and code lines that arrived since.
-      markBlocks([document.documentElement]);
+      markBlocks(roots);
     },
   }, off);
 }
@@ -1693,6 +1762,39 @@ function noteThinkingFallback() {
 /** The chat on screen: other tabs keep their scrollers mounted but hidden (zero size). */
 function visibleChat() {
   return Array.from(document.querySelectorAll('[data-testid="agent-chat-scroll"]')).find((el) => el.getBoundingClientRect().height > 0);
+}
+
+let stopExpansionFollow: (() => void) | undefined;
+
+/** Paseo 0.11.4 follows resized content one frame late. Keep an already pinned chat at the bottom before paint during a disclosure. */
+export function followExpansionAtBottom() {
+  if (Platform.OS !== "web" || typeof document === "undefined" || typeof ResizeObserver === "undefined") return;
+  stopExpansionFollow?.();
+  const chat = visibleChat();
+  if (!chat || getComputedStyle(chat).overflowAnchor === "none" || Math.abs(chat.scrollHeight - chat.clientHeight - chat.scrollTop) > 1) return;
+  const content = chat.firstElementChild;
+  if (!content) return;
+  const observer = new ResizeObserver(() => {
+    if (!chat.isConnected || getComputedStyle(chat).overflowAnchor === "none") return stop();
+    chat.scrollTop = Math.max(0, chat.scrollHeight - chat.clientHeight);
+  });
+  const stop = () => {
+    observer.disconnect();
+    clearTimeout(timer);
+    chat.removeEventListener("wheel", stop, true);
+    chat.removeEventListener("touchstart", stop, true);
+    chat.removeEventListener("pointerdown", stop, true);
+    document.removeEventListener("keydown", stop, true);
+    if (stopExpansionFollow === stop) stopExpansionFollow = undefined;
+  };
+  // Includes the 100ms transition, its first frame, and deferred output removal.
+  const timer = setTimeout(stop, 200);
+  stopExpansionFollow = stop;
+  observer.observe(content);
+  chat.addEventListener("wheel", stop, true);
+  chat.addEventListener("touchstart", stop, true);
+  chat.addEventListener("pointerdown", stop, true);
+  document.addEventListener("keydown", stop, true);
 }
 
 /**

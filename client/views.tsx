@@ -6,6 +6,7 @@ import { AccessibilityInfo, Animated, Easing, Image, LayoutAnimation, Modal, Pla
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { z } from "zod";
 import { readImage } from "../shared/image";
+import { loadImage } from "./images";
 import type { Recap } from "../shared/recap";
 import type { IconKind } from "../shared/timeline";
 import { todoData, toolData, type imagesSchema, type noticeSchema, type planSchema, type stepsSchema, type thoughtSchema, type todoSchema, type ToolData, type Tone } from "./model";
@@ -14,10 +15,13 @@ import { contrast, isHex } from "../shared/theme";
 import { highlight, highlightShell, highlightShellBlock, SYNTAX_THEMES, type Span, type SyntaxColors } from "./highlight";
 import { usePrefs } from "./prefs";
 import { useCurrentTheme } from "./theme-registry";
-import { readHostAppearance, type HostAppearance } from "./web";
+import { followExpansionAtBottom, readHostAppearance, type HostAppearance } from "./web";
 
 type Colors = PluginTheme["colors"];
 const SQUIRCLE_CARD = { dataSet: { cpSquircle: "card" } } as object;
+const ROW_HOVER = { dataSet: { cpRow: "" } } as object;
+const RUNNING_LABEL = { dataSet: { cpRunningLabel: "" } } as object;
+const NO_WRAP_SCROLL = { dataSet: { cpNowrap: "" } } as object;
 
 // Paseo's own fallback stack when Settings → Appearance → Code font is empty.
 const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" });
@@ -71,7 +75,7 @@ function makeStyles(c: Colors, a: HostAppearance) {
     row: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 26, paddingVertical: 3 },
     slot: { width: ICON_SLOT, height: 18, alignItems: "center", justifyContent: "center" },
     verb: { ...ui, color: c.foreground, fontSize: body, fontWeight: "500" },
-    target: { ...ui, color: c.foregroundMuted, fontSize: body, flexShrink: 1 },
+    target: { ...ui, color: c.foregroundMuted, fontSize: body, flexShrink: 1, opacity: 0.85 },
     mono: { ...mono, fontSize: a.codeSize + 1 },
     meta: { ...ui, color: c.foregroundMuted, fontSize: body - 2, fontVariant: ["tabular-nums"], marginLeft: "auto", flexShrink: 0 },
     detail: { paddingLeft: INDENT, paddingTop: 2, marginTop: 6 },
@@ -80,7 +84,7 @@ function makeStyles(c: Colors, a: HostAppearance) {
     blockHead: { flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: rule },
     blockBody: { paddingHorizontal: 12, paddingVertical: 9 },
     code: { ...code, color: c.foreground },
-    gutter: { ...code, color: c.foregroundMuted, opacity: 0.6, textAlign: "right", minWidth: a.codeSize * 2.4 },
+    gutter: { ...code, color: c.foregroundMuted, opacity: 0.6, textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
     small: { ...ui, color: c.foregroundMuted, fontSize: body - 1, lineHeight: Math.round((body - 1) * 1.45) },
     label: { ...ui, color: c.foregroundMuted, fontSize: 10, fontWeight: "600", letterSpacing: 0.8, marginBottom: 4 },
     prose: { ...ui, color: c.foregroundMuted, fontSize: body, lineHeight: Math.round(body * 1.6) },
@@ -198,15 +202,46 @@ function useDisclosure(initial = false) {
   const [open, setOpen] = useState(initial);
   const reduced = useReducedMotion();
   const toggle = useCallback(() => {
-    if (!reduced) LayoutAnimation.configureNext(LayoutAnimation.create(200, "easeOut", "opacity"));
+    followExpansionAtBottom();
+    if (!reduced && Platform.OS !== "web") LayoutAnimation.configureNext(LayoutAnimation.create(100, "easeOut", "opacity"));
     setOpen((v) => !v);
   }, [reduced]);
   return [open, toggle, setOpen] as const;
 }
 
 function FadeIn({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  const opacity = useTween(1, 200, 0);
-  return <Animated.View style={[style, { opacity }]}>{children}</Animated.View>;
+  const opacity = useTween(1, 100, 0);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY: opacity.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }] }]}>{children}</Animated.View>;
+}
+
+/** Keep output only through the closing transition; reopening cancels its pending removal. */
+function Expand({ open, children, style }: { open: boolean; children: ReactNode | (() => ReactNode); style?: StyleProp<ViewStyle> }) {
+  const reduced = useReducedMotion();
+  const [present, setPresent] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    if (!present) return;
+    if (reduced || Platform.OS !== "web") {
+      setPresent(false);
+      return;
+    }
+    // Leave a small buffer beyond the 100ms CSS transition before releasing the content.
+    const timer = setTimeout(() => setPresent(false), 130);
+    return () => clearTimeout(timer);
+  }, [open, present, reduced]);
+  if (!open && (!present || reduced || Platform.OS !== "web")) return null;
+  const content = typeof children === "function" ? children() : children;
+  if (Platform.OS !== "web") return <FadeIn style={style}>{content}</FadeIn>;
+  return (
+    <View {...({ dataSet: { cpExpand: open ? "open" : "closed" } } as object)} accessibilityElementsHidden={!open}>
+      <View style={{ minHeight: 0, overflow: "hidden" }}>
+        <View style={style}>{content}</View>
+      </View>
+    </View>
+  );
 }
 
 interface RowProps {
@@ -262,18 +297,19 @@ function useSteady<T>(value: T, key: string, hold: number, active = true): T {
 function Row(p: RowProps) {
   const s = useStyles(p.theme);
   const [hovered, setHovered] = useState(false);
-  const pulse = usePulse(!!p.pulsing);
   const swap = useSwap(`${p.verb}\n${p.target ?? ""}`, !!p.swap);
   const syntax = useSyntax(p.theme);
   const { commandColors, steps, rowIcons } = usePrefs();
   const bare = rowIcons[p.kind] === "hide";
+  const pulse = usePulse(!!p.pulsing && Platform.OS !== "web");
   const c = p.theme.colors;
-  const rotation = useTween(p.open ? 1 : 0, 200);
-  const chevronOpacity = useTween(hovered || p.open || p.compact ? 0.7 : 0, 120);
-  // Rows step back so the reply reads first; hover, open, running and failed rows come back to full strength.
-  const quiet = steps !== "full" && !(hovered || p.open || p.pulsing || p.iconColor);
+  const rotation = useTween(p.open ? 1 : 0, 100);
+  const chevronOpacity = useTween(hovered || p.open || p.compact ? 0.7 : 0, 80);
+  // All idle rows, including failures, follow Strength; hover, open and running rows come back to full strength.
+  const quiet = steps !== "full" && !(hovered || p.open || p.pulsing);
   return (
     <Pressable
+      {...ROW_HOVER}
       disabled={!p.onToggle}
       onPress={p.onToggle}
       onHoverIn={() => setHovered(true)}
@@ -289,17 +325,24 @@ function Row(p: RowProps) {
         </View>
       )}
       {/* Baseline, not center: the verb is in the content size and a mono target a point smaller, so centering left them a pixel apart. */}
-      <Animated.View style={[{ flexDirection: "row", alignItems: "baseline", gap: 8, flexShrink: 1, minWidth: 0 }, swap]}>
+      <Animated.View
+        {...(p.pulsing ? RUNNING_LABEL : null)}
+        style={[
+          { flexDirection: "row", alignItems: "baseline", gap: 8, flexShrink: 1, minWidth: 0 },
+          swap,
+          Platform.OS !== "web" && { opacity: Animated.multiply(swap?.opacity ?? 1, pulse.interpolate({ inputRange: [0.45, 1], outputRange: [0.82, 1] })) },
+        ]}
+      >
         {/* One line: a long merged summary ends in "…" rather than wrapping the row; with a target, the target gives way instead. */}
-        <Animated.Text numberOfLines={1} style={[s.verb, { opacity: pulse, flexShrink: p.target ? 0 : 1 }, bare && p.iconColor ? { color: p.iconColor } : null]}>
+        <Text numberOfLines={1} style={[s.verb, { flexShrink: p.target ? 0 : 1 }, bare && p.iconColor ? { color: p.iconColor } : null]}>
           {p.verb}
-        </Animated.Text>
+        </Text>
         {p.target ? (
           <Text
             numberOfLines={1}
             ellipsizeMode="middle"
             {...(p.mono ? PMONO : null)}
-            style={[s.target, p.mono && s.mono, hovered && { color: c.foreground }, p.struck && { textDecorationLine: "line-through" }]}
+            style={[s.target, p.mono && s.mono, hovered && !p.pulsing && { color: c.foreground }, p.struck && { textDecorationLine: "line-through" }]}
           >
             {p.shell && (p.open || commandColors === "always") && syntax ? colored(highlightShell(p.target), syntax) : p.target}
           </Text>
@@ -348,10 +391,12 @@ export function CodeLine({ text, theme, style, shell }: { text: string; theme: P
   );
 }
 
-function Scroll({ children }: { children: ReactNode }) {
+function Scroll({ children, nowrap = false }: { children: ReactNode; nowrap?: boolean }) {
   return (
-    <ScrollView style={{ maxHeight: 320 }} nestedScrollEnabled>
-      {children}
+    <ScrollView {...(nowrap ? NO_WRAP_SCROLL : null)} style={{ maxHeight: 320 }} nestedScrollEnabled>
+      {nowrap && Platform.OS !== "web" ? (
+        <ScrollView horizontal nestedScrollEnabled contentContainerStyle={{ flexGrow: 1 }}>{children}</ScrollView>
+      ) : children}
     </ScrollView>
   );
 }
@@ -359,12 +404,13 @@ function Scroll({ children }: { children: ReactNode }) {
 function ToolDetail({ data, theme }: { data: NonNullable<ToolData["detail"]>; theme: PluginTheme }) {
   const s = useStyles(theme);
   const c = theme.colors;
+  const wrap = usePrefs().diffWrap === "on";
   switch (data.kind) {
     case "output":
       return (
         <View style={s.block}>
           {data.command ? (
-            <View style={s.blockHead}>
+            <View style={[s.blockHead, !data.text && { borderBottomWidth: 0 }]}>
               <Text {...PMONO} style={[s.code, { color: c.foregroundMuted, fontSize: s.code.fontSize + 0.5 }]}>$</Text>
               <CodeLine text={data.command} theme={theme} shell style={[s.code, { flex: 1, fontSize: s.code.fontSize + 0.5 }]} />
               {data.cwd ? <Text {...PMONO} style={[s.code, { color: c.foregroundMuted, fontSize: s.code.fontSize - 0.5 }]}>{data.cwd.split("/").pop()}</Text> : null}
@@ -381,24 +427,25 @@ function ToolDetail({ data, theme }: { data: NonNullable<ToolData["detail"]>; th
       );
     case "diff": {
       // An edit without hunk headers has no line numbers: no empty gutter then.
-      const numbered = data.lines.some((l) => l.n);
+      const numberDigits = data.lines.reduce((max, l) => Math.max(max, String(l.n ?? "").length), 0);
+      const lineStyle = wrap ? { flex: 1, minWidth: 0 } : { flexGrow: 1, flexShrink: 0 };
       return (
         <View style={s.block}>
-          <Scroll>
-            <View style={{ paddingVertical: 6 }}>
+          <Scroll nowrap={!wrap}>
+            <View style={{ paddingVertical: 6, flexGrow: 1 }}>
               {data.lines.map((l, i) => {
                 const color = l.sign === "+" ? c.statusSuccess : l.sign === "-" ? c.statusDanger : undefined;
                 return (
                   <View key={i} style={{ flexDirection: "row", gap: 12, paddingHorizontal: 12, paddingVertical: 1, backgroundColor: color ? alpha(color, 0.12) : undefined }}>
-                    {numbered ? <Text {...PMONO} style={s.gutter}>{l.n ?? ""}</Text> : null}
-                    <Text {...PMONO} style={[s.code, { color: color ?? c.foregroundMuted, width: 10, marginRight: -6 }]}>{l.sign}</Text>
+                    <Text {...PMONO} style={[s.code, { color: color ?? c.foregroundMuted, width: s.code.fontSize, flexShrink: 0, marginRight: -6 }]}>{l.sign}</Text>
+                    {numberDigits ? <Text {...PMONO} style={s.gutter}>{String(l.n ?? "").padStart(numberDigits, "\u2007")}</Text> : null}
                     {/* Added and removed lines read in their color, as in the design; context lines keep the highlight theme. */}
                     {color ? (
-                      <Text {...PMONO} selectable style={[s.code, { flex: 1, color }]}>
+                      <Text {...PMONO} selectable style={[s.code, lineStyle, { color }]}>
                         {l.text}
                       </Text>
                     ) : (
-                      <CodeLine text={l.text} theme={theme} style={[s.code, { flex: 1 }]} />
+                      <CodeLine text={l.text} theme={theme} style={[s.code, lineStyle]} />
                     )}
                   </View>
                 );
@@ -493,10 +540,10 @@ export function ToolItem({ item, theme, layout, nested }: PluginTimelineItemProp
           {d.error}
         </Text>
       ) : null}
-      {open && d.detail ? (
-        <FadeIn style={[s.detail, { paddingLeft: indent }]}>
+      {d.detail ? (
+        <Expand open={open} style={[s.detail, { paddingLeft: indent, marginBottom: 12 }]}>
           <ToolDetail data={d.detail} theme={theme} />
-        </FadeIn>
+        </Expand>
       ) : null}
     </Animated.View>
   );
@@ -569,9 +616,7 @@ export function MergedSteps(
         open={open}
         onToggle={toggle}
       />
-      {open ? (
-        <FadeIn style={{ marginLeft: icons ? 9 : 0, paddingLeft: icons ? 15 : 13, paddingTop: 3, paddingBottom: 3, borderLeftWidth: 1, borderLeftColor: alpha(c.border, 0.6) }}>{steps.map((s) => step(s))}</FadeIn>
-      ) : null}
+      <Expand open={open} style={{ marginLeft: icons ? 9 : 0, paddingLeft: icons ? 15 : 13, paddingTop: 3, paddingBottom: 3, borderLeftWidth: 1, borderLeftColor: alpha(c.border, 0.6) }}>{() => steps.map((s) => step(s))}</Expand>
     </View>
   );
 }
@@ -711,7 +756,7 @@ export function TodoItem({ item, theme }: PluginTimelineItemProps<z.output<typeo
   const { items, active } = item.data;
   const done = items.filter((t) => t.status === "completed").length;
   const progress = useTween(items.length ? done / items.length : 0, 300);
-  const rotation = useTween(open ? 1 : 0, 200);
+  const rotation = useTween(open ? 1 : 0, 100);
   return (
     <View>
       <Pressable
@@ -780,32 +825,21 @@ export function NoticeItem({ item, theme }: PluginTimelineItemProps<z.output<typ
   );
 }
 
-// Data URLs of recently shown images, keyed by source; bounded so a long session can't pile up megabytes.
-const imageCache = new Map<string, Promise<string>>();
-const IMAGE_CACHE_SIZE = 24;
-
-function useImage(url: string) {
+function useImage(url: string, variant: "thumbnail" | "original" = "original") {
   const read = useRpc(readImage);
-  const [state, setState] = useState<{ uri?: string; failed?: boolean }>({});
+  const key = `${variant}:${url}`;
+  const [state, setState] = useState<{ key?: string; uri?: string; failed?: boolean }>({});
   useEffect(() => {
-    if (/^(https?:|data:)/.test(url)) return void setState({ uri: url });
-    let pending = imageCache.get(url);
-    if (!pending) {
-      pending = read({ path: url }).then((r) => r.dataUrl);
-      pending.catch(() => imageCache.delete(url));
-      imageCache.set(url, pending);
-      if (imageCache.size > IMAGE_CACHE_SIZE) imageCache.delete(imageCache.keys().next().value!);
-    }
     let alive = true;
-    pending.then(
-      (uri) => alive && setState({ uri }),
-      () => alive && setState({ failed: true }),
+    loadImage(url, variant, read).then(
+      (uri) => alive && setState({ key, uri }),
+      () => alive && setState({ key, failed: true }),
     );
     return () => {
       alive = false;
     };
-  }, [url, read]);
-  return state;
+  }, [url, variant, key, read]);
+  return state.key === key ? state : {};
 }
 
 const THUMB = { small: { width: 200, height: 128 }, large: { width: 320, height: 200 } };
@@ -813,7 +847,7 @@ const THUMB = { small: { width: 200, height: 128 }, large: { width: 320, height:
 function Thumbnail({ alt, url, theme, onOpen }: { alt: string; url: string; theme: PluginTheme; onOpen(): void }) {
   const s = useStyles(theme);
   const c = theme.colors;
-  const { uri, failed } = useImage(url);
+  const { uri, failed } = useImage(url, "thumbnail");
   const size = THUMB[usePrefs().images === "large" ? "large" : "small"];
   const frame = [size, { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" as const }];
   if (!uri) {

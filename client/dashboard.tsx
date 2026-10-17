@@ -1276,6 +1276,9 @@ function PrefsEditor({ theme, page, prefs, onChange }: { theme: PluginTheme; pag
               ]}
             />
           </Row>
+          <Row theme={theme} label="Wrap diff lines" hint="Off keeps long lines on one row.">
+            <Switch theme={theme} label="Wrap diff lines" value={prefs.diffWrap === "on"} onChange={(on) => set("diffWrap")(on ? "on" : "off")} />
+          </Row>
           <Row theme={theme} stacked label="Show in timeline" hint="Running and failed calls always show.">
             {HIDEABLE.map((k) => {
               const shown = !prefs.hidden.includes(k);

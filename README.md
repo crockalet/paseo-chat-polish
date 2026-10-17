@@ -6,7 +6,8 @@ A [Paseo](https://paseo.sh) plugin that redraws the agent chat as one quiet colu
 
 ## What it does
 
-- **Tool calls as single rows.** An icon, a verb that shows the state (Running, Ran), the command or file, and a short detail. Open a row for its diff, output or raw input and output. Failed calls turn red.
+- **Tool calls as single rows.** An icon, a verb that shows the state (Running, Ran), the command or file, and a short detail. Open a row for its diff, output or raw input and output. Failed calls keep their red status and follow the same row strength as other calls; hover or open a row to brighten it.
+- **Diff wrapping.** Long diff lines scroll horizontally by default. Enable **Wrap diff lines** under **Tool calls** in the dashboard to wrap them to the available width.
 - **Steps merged between replies.** The thoughts and tool calls before an answer fold into one row, such as "Edited 1 file and ran 1 command", which opens to each step.
 - **Themes.** Pick one of Paseo's built-in themes or a Chat Polish one (Mariana, Paper, Dusk), or edit the colors with contrast checks. Fonts and sizes are set from the same page.
 - **Rich text styles.** Three or four looks each for quotes, tables, code blocks, inline code, headings, lists, callouts and rules.
@@ -29,23 +30,48 @@ The Theme page previews code too. The Code tab draws the same rows the chat uses
 
 ## Install
 
-Requires Paseo 0.11.2 or later.
+Requires Paseo 0.11.2 or later, with Node.js 20.9+ and npm available on the **daemon host**. For a remote host, install prerequisites there. Paseo prepares the locked dependencies and image thumbnail support automatically.
+
+### From the Paseo app
+
+1. Open **Settings → Plugins** on the host where you want to install Chat Polish.
+2. Turn on **Enable plugins** if it is off.
+3. Paste the GitHub repository URL into **Plugin source**:
+
+   ```text
+   https://github.com/lthieu96/paseo-chat-polish
+   ```
+
+4. Select **Install plugin** and wait for its status to become **running**.
+5. Open **Chat Polish** in the sidebar.
+
+To install the reviewed Paseo Registry revision instead, use `lthieu96/chat-polish` in **Plugin source**. A registry revision can be older than the latest GitHub release.
+
+### From the command line
+
+Install directly from GitHub:
+
+```sh
+paseo plugin add git:lthieu96/paseo-chat-polish
+```
+
+Or install a specific GitHub release:
+
+```sh
+paseo plugin add git:lthieu96/paseo-chat-polish --ref v0.2.0
+```
+
+For the reviewed Paseo Registry revision:
 
 ```sh
 paseo plugin add lthieu96/chat-polish
 ```
 
-Install directly from GitHub instead:
-
-```sh
-paseo plugin add github:lthieu96/paseo-chat-polish
-```
-
-To install a specific GitHub release, pass its tag, such as `--ref v0.1.0`.
+Check the installation with `paseo plugin ls`. Open **Chat Polish** in Paseo's sidebar once it is running. For individual tool rows, set **Settings → Appearance → Tool call display → Detailed**.
 
 ## Update
 
-The dashboard sidebar shows **Update available** when a newer revision is available. Press **Update** and Paseo installs it and restarts the plugin. From a terminal:
+The dashboard sidebar shows **Update available** when a newer revision is available. Press **Update** to install it and restart the plugin. You can also update from **Settings → Plugins**, or from a terminal:
 
 ```sh
 paseo plugin update paseo-chat-polish
@@ -55,14 +81,16 @@ Registry installs use the revision approved for the listing. Direct GitHub insta
 
 ## Release
 
-Update the version in `package.json` and `package-lock.json` in your PR. After the PR merges into `main`, the workflow typechecks and tests the plugin, then creates a GitHub Release tagged `v<version>` with generated notes:
+Releases are published on GitHub and submitted to Paseo Registry using their GitHub tag. To prepare a release, update the version in `package.json` and `package-lock.json` in your PR:
 
 ```sh
-# Example: bump 0.1.0 to 0.1.1 before merging
+# Example: bump 0.2.0 to 0.2.1 before merging
 npm version patch --no-git-tag-version
 ```
 
-Each version is released once. To update the Paseo Registry listing, submit the new GitHub tag as a revision through the [plugin submission form](https://github.com/getpaseo/plugins/issues/new?template=submit-plugin.yml). Registry updates are reviewed before users receive the new revision.
+Commit all source, manifest and lockfile changes. The PR checks must pass before merging into `main`; after the merge, the workflow typechecks and tests the plugin again, then creates a GitHub Release tagged `v<version>` with generated notes. Each version is released once.
+
+To update the Paseo Registry listing, submit the new GitHub tag as a revision through the [plugin submission form](https://github.com/getpaseo/plugins/issues/new?template=submit-plugin.yml). Registry updates are reviewed before users receive the new revision. Keep `package-lock.json` committed: GitHub and registry installs use it to prepare production dependencies on the daemon.
 
 ## Limitations
 

@@ -11,12 +11,13 @@ export type Phase = "streaming" | "complete";
 /** A timeline item and when it last changed (ms). */
 export interface Entry {
   item: Item;
-  at: number;
+  /** Unknown when restored history supplies an import time instead of the event time. */
+  at?: number;
 }
 export interface Run {
   steps: Item[];
   /** From the end of what came before the run to the last step's latest update. */
-  ms: number;
+  ms?: number;
   /** Nothing has come after the run yet: while the agent works, its next step may still join. */
   open: boolean;
 }
@@ -82,16 +83,38 @@ export function applyItem(list: Entry[], item: Item, at: number): boolean {
   return true;
 }
 
+const timestampMs = (timestamp: string | undefined) => {
+  const at = Date.parse(timestamp ?? "");
+  return Number.isFinite(at) ? at : undefined;
+};
+
+/** Restored events cannot belong after their next prompt or the idle agent's last update.
+ * Keep their content, but leave timing unknown rather than measuring the gap to the import date. */
+export function historyEntries(entries: readonly { item: Item; timestamp: string }[], endedAt?: string): Entry[] {
+  let ceiling = timestampMs(endedAt);
+  const list: Entry[] = entries.map(({ item, timestamp }) => ({ item, at: timestampMs(timestamp) }));
+  for (let i = list.length - 1; i >= 0; i--) {
+    const entry = list[i]!;
+    if (entry.at === undefined) continue;
+    if (ceiling !== undefined && entry.at > ceiling) entry.at = undefined;
+    if (entry.item.type === "user_message" && entry.at !== undefined) ceiling = entry.at;
+  }
+  return list;
+}
+
 /** Runs of consecutive steps; anything else ends a run, and items `skip` names (hidden by prefs) are passed over. Todo updates join a run but
  * never make one: a run of only todo updates isn't a run, so those stand on their own. */
 export function stepRuns(list: readonly Entry[], skip: (item: Item) => boolean): Run[] {
   const runs: Run[] = [];
   let run: Item[] = [];
-  let start = 0;
-  let end = 0;
+  let start: number | undefined;
+  let end: number | undefined;
+  let timed = true;
   const close = (open = false) => {
-    if (run.some((s) => s.type !== "todo")) runs.push({ steps: run, ms: Math.max(0, end - start), open });
+    if (run.some((s) => s.type !== "todo")) runs.push({ steps: run, ms: timed && start !== undefined && end !== undefined ? end - start : undefined, open });
     run = [];
+    start = end = undefined;
+    timed = true;
   };
   let lastTodo: string | undefined;
   for (const [i, { item, at }] of list.entries()) {
@@ -106,9 +129,13 @@ export function stepRuns(list: readonly Entry[], skip: (item: Item) => boolean):
       close();
       continue;
     }
-    if (!run.length) start = list[i - 1]?.at ?? at;
+    if (!run.length) {
+      start = i ? list[i - 1]!.at : at;
+      timed = start !== undefined;
+    }
     run.push(item);
-    end = Math.max(end, at);
+    if (at === undefined || (start !== undefined && at < start)) timed = false;
+    if (at !== undefined) end = Math.max(end ?? at, at);
   }
   close(true);
   return runs;
@@ -166,6 +193,8 @@ const made = new Map<string, "head" | "none">();
 const todoChanges = new Map<string, TaskChange[]>();
 // ponytail: seen keeps the latest few thousand steps across agents; key it per agent if long sessions show stale rows.
 const SEEN_MAX = 4000;
+const HISTORY_MAX = 1000;
+const HISTORY_KEEP = 750;
 
 const headListeners = new Map<string, Set<() => void>>();
 const versions = new Map<string, number>();
@@ -189,6 +218,7 @@ function touch(head: string) {
   queueMicrotask(() => {
     flushQueued = false;
     for (const h of dirty) {
+      if (!headListeners.has(h)) continue;
       versions.set(h, (versions.get(h) ?? 0) + 1);
       headListeners.get(h)?.forEach((l) => l());
     }
@@ -204,8 +234,28 @@ function unplace(agentId: string) {
   }
 }
 
-/** Re-splits one agent's runs after its list changed (about 3ms for 1000 items), and asks for a fresh transform if a step now belongs elsewhere. */
+function forget(key: string) {
+  seen.delete(key);
+  made.delete(key);
+  if (!headListeners.has(key)) versions.delete(key);
+}
+
+/** Keep recent complete turns, without splitting the active turn even when it exceeds the history budget. */
+function trimHistory(list: Entry[]) {
+  if (list.length <= HISTORY_MAX) return;
+  let cut = 0;
+  for (let i = 1; i < list.length; i++) {
+    if (list[i]!.item.type !== "user_message") continue;
+    cut = i;
+    if (list.length - i <= HISTORY_KEEP) break;
+  }
+  if (cut) list.splice(0, cut);
+}
+
+/** Re-splits one agent's runs, notifying only changed runs and restoring rows that left the retained history. */
 function rebuild(agentId: string) {
+  const oldKeys = keysByAgent.get(agentId) ?? [];
+  const oldRuns = new Map(oldKeys.flatMap((key) => runs.has(key) ? [[key, runs.get(key)!] as const] : []));
   unplace(agentId);
   const keys: string[] = [];
   const list = lists.get(agentId) ?? [];
@@ -221,9 +271,9 @@ function rebuild(agentId: string) {
   for (const run of stepRuns(list, skip)) {
     // The merged row stands where the run's first thought or tool call is; todo updates are only ever folded in.
     const head = stepKey(run.steps.find((s) => s.type !== "todo")!)!;
-    const before = runs.get(head);
+    const before = oldRuns.get(head);
     runs.set(head, run);
-    if (before?.ms !== run.ms || before.open !== run.open || before.steps.length !== run.steps.length || before.steps.some((x, i) => x !== run.steps[i])) touch(head);
+    if (!before || before.ms !== run.ms || before.open !== run.open || before.steps.length !== run.steps.length || before.steps.some((x, i) => x !== run.steps[i])) touch(head);
     run.steps.forEach((item, index) => {
       const key = stepKey(item)!;
       places.set(key, { head, index: key === head ? 0 : index + 1 });
@@ -231,7 +281,15 @@ function rebuild(agentId: string) {
     });
   }
   keysByAgent.set(agentId, keys);
-  if (keys.some(stale)) onStale();
+  const retained = new Set(keys);
+  let evictedRows = false;
+  for (const key of oldKeys) {
+    if (retained.has(key)) continue;
+    evictedRows ||= made.has(key);
+    forget(key);
+    if (oldRuns.has(key)) touch(key);
+  }
+  if (evictedRows || keys.some(stale)) onStale();
 }
 
 /** A step the transformer made differently than it would now. Only a step made before its run was known and that turned out not to
@@ -250,14 +308,16 @@ function expected(key: string) {
 export function placeStep(item: Item, phase: Phase): { key: string; as: "head" | "none" } | undefined {
   const key = stepKey(item);
   if (!key) return undefined;
+  const previous = seen.get(key);
   seen.delete(key);
   seen.set(key, { item, phase });
-  if (seen.size > SEEN_MAX) for (const old of [...seen.keys()].slice(0, SEEN_MAX / 4)) seen.delete(old);
+  if (seen.size > SEEN_MAX) for (const old of [...seen.keys()].slice(0, SEEN_MAX / 4)) forget(old);
   const as = expected(key);
+  const changed = previous?.item !== item || previous.phase !== phase || made.get(key) !== as;
   made.set(key, as);
   const place = places.get(key);
   if (!place) onUnplaced();
-  touch(place?.head ?? key);
+  if (changed) touch(place?.head ?? key);
   return { key, as };
 }
 
@@ -271,9 +331,10 @@ export function followAgent(paseo: PluginClientContext["paseo"], agentId: string
     try {
       const page = await timeline.refetch({ direction: "tail", limit: 1000, projection: "projected" });
       if (closed) return;
-      const list = page.entries.map((e) => ({ item: e.item as Item, at: Date.parse(e.timestamp) || 0 }));
+      const list = historyEntries(page.entries, page.agent?.status === "idle" ? page.agent.updatedAt : undefined);
       const end = page.endCursor?.seq ?? -1;
       for (const e of pending) if (e.seq === undefined || e.seq > end) applyItem(list, e.item, e.at);
+      trimHistory(list);
       lists.set(agentId, list);
       rebuild(agentId);
     } catch (error) {
@@ -286,16 +347,24 @@ export function followAgent(paseo: PluginClientContext["paseo"], agentId: string
     const { event } = payload;
     if (event.type === "timeline") {
       const item = event.item as Item;
-      const at = ("timestamp" in payload && Date.parse(payload.timestamp)) || Date.now();
+      const at = timestampMs("timestamp" in payload ? payload.timestamp : undefined) ?? Date.now();
       if (pending) return void pending.push({ seq: "seq" in payload ? payload.seq : undefined, item, at });
       const list = lists.get(agentId);
-      if (list && applyItem(list, item, at)) rebuild(agentId);
+      if (list && applyItem(list, item, at)) {
+        trimHistory(list);
+        rebuild(agentId);
+      }
     } else if (event.type === "replacement" || event.type === "subscription_restored") void load();
   });
   subscription.ready.then(load, (error: unknown) => console.warn("[chat-polish] Couldn't follow the timeline to merge steps", error));
   return () => {
+    if (closed) return;
     closed = true;
     subscription();
+    for (const key of keysByAgent.get(agentId) ?? []) {
+      forget(key);
+      if (runs.has(key)) touch(key);
+    }
     unplace(agentId);
     keysByAgent.delete(agentId);
     lists.delete(agentId);
@@ -324,7 +393,10 @@ export function subscribeRun(head: string, listener: () => void) {
   set.add(listener);
   return () => {
     set.delete(listener);
-    if (!set.size) headListeners.delete(head);
+    if (!set.size) {
+      headListeners.delete(head);
+      versions.delete(head);
+    }
   };
 }
 

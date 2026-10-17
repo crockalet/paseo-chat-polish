@@ -332,3 +332,4 @@ export const runVersion = (head: string) => versions.get(head) ?? 0;
 export const changesOfTodo = (key: string): readonly TaskChange[] => todoChanges.get(key) ?? [];
 /** What a todo update changed when there is no timeline to work it out from (the dashboard preview's sample). */
 export const setTodoChanges = (item: Item, changes: TaskChange[]) => void todoChanges.set(stepKey(item)!, changes);
+

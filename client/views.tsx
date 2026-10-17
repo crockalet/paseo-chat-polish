@@ -17,6 +17,7 @@ import { useCurrentTheme } from "./theme-registry";
 import { readHostAppearance, type HostAppearance } from "./web";
 
 type Colors = PluginTheme["colors"];
+const SQUIRCLE_CARD = { dataSet: { cpSquircle: "card" } } as object;
 
 // Paseo's own fallback stack when Settings → Appearance → Code font is empty.
 const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" });
@@ -621,7 +622,7 @@ export function PlanItem({ item, theme }: PluginTimelineItemProps<z.output<typeo
   const long = text.split("\n").length > 14 || text.length > 1200;
   const steps = text.match(/^\s*\d+[.)]\s/gm)?.length ?? 0;
   return (
-    <View style={s.card}>
+    <View {...SQUIRCLE_CARD} style={s.card}>
       <View style={s.cardHead}>
         <Icon name="Map" size={15} color={theme.colors.accent} />
         <Text style={s.title}>Plan</Text>

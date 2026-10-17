@@ -79,10 +79,13 @@ declare function getComputedStyle(el: DomElement): {
   marginLeft: string;
   height: string;
   color: string;
+  position: string;
+  zIndex: string;
+  boxShadow: string;
 };
 declare function getSelection(): { toString(): string } | null;
 declare class MutationObserver {
-  constructor(cb: (records: Array<{ addedNodes: ArrayLike<unknown> }>) => void);
+  constructor(cb: (records: Array<{ addedNodes: ArrayLike<unknown>; target?: unknown; attributeName?: string | null }>) => void);
   observe(target: unknown, options: { childList: boolean; subtree: boolean; attributes?: boolean; attributeFilter?: string[] }): void;
   disconnect(): void;
 }
@@ -218,11 +221,17 @@ export function watchDom(watcher: DomWatcher, cleanup: () => void) {
   if (!observer) {
     observer = new MutationObserver((records) => {
       const roots: DomElement[] = [];
-      for (const record of records) for (const node of Array.from(record.addedNodes)) if ((node as { nodeType?: number }).nodeType === 1) roots.push(node as DomElement);
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) if ((node as { nodeType?: number }).nodeType === 1) roots.push(node as DomElement);
+        if (record.attributeName && record.target && document.querySelector(SETTINGS_PANE)) {
+          const target = record.target as DomElement;
+          if (target.closest(SETTINGS_PANE) || getComputedStyle(target).position === "absolute" || getComputedStyle(target).position === "fixed") roots.push(target);
+        }
+      }
       if (roots.length) for (const w of watchers) w.added?.(roots);
       settleTimer ??= setTimeout(settle, 250);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "aria-hidden", "aria-expanded", "data-state"] });
   }
   watcher.added?.([document.body as DomElement]);
   watcher.settled?.();
@@ -261,7 +270,7 @@ export function paintSidebar(colors: () => { sidebar: string } | undefined) {
 }
 
 const SELECT_CSS = `
-[data-cp-select] { position: fixed; z-index: 10000; display: flex; align-items: center; gap: 1px; padding: 3px; border: 1px solid var(--colors-border); border-radius: 8px; background-color: var(--cp-control, var(--colors-surface2)); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); animation: cp-pop 120ms ease-out; }
+[data-cp-select] { position: fixed; z-index: 10000; display: flex; align-items: center; gap: 1px; padding: 3px; border: 1px solid var(--colors-border); border-radius: 8px; background-color: var(--cp-control, var(--colors-surface2)); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); animation: cp-pop 40ms ease-out; }
 :root:is(.light, .pluginLight) [data-cp-select] { background-color: var(--cp-raised, var(--colors-surface1)); }
 [data-cp-select] > span { padding: 0 4px 0 7px; color: var(--cp-muted, var(--colors-foreground-muted)); font-size: 12px; }
 [data-cp-select] > button { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--cp-fg, var(--colors-foreground)); font-family: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
@@ -508,8 +517,8 @@ const CLOCK_MASK = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="ht
 // On close, the context card is swapped for an exit copy without its FadeIn; animating that copy made it blink, so only
 // the open card (FadeIn in its style) rises in.
 // Floating surfaces drawn alike: pickers, Paseo's menus (tagged by tagParts), Command Center.
-const SURFACE = ':is([data-testid="combobox-desktop-container"], [data-cp-part="menu"], [data-testid="command-center-panel"])';
-const POPOVER = `:is(:is([data-testid="combobox-desktop-container"], [data-testid="chat-outline-preview"]):not([style*="opacity: 0"]), [data-testid="context-window-details"][style*="FadeIn"]):not([style*="-9999"])`;
+const SURFACE = ':is([data-testid="combobox-desktop-container"], [data-cp-part="menu"], [role="menu"], [role="listbox"], [data-testid="command-center-panel"])';
+const POPOVER = `:is(:is([data-testid="combobox-desktop-container"], [data-testid="chat-outline-preview"]):not([style*="opacity: 0"]), [data-testid="context-window-details"][style*="FadeIn"], :is([data-cp-part="menu"], [role="menu"], [role="listbox"]):not([hidden]):not([aria-hidden="true"]):not([data-state="closed"]):not([style*="opacity: 0"])):not([style*="-9999"])`;
 
 // The chat's own chrome from the "Chat Surfaces" design: turn footer, composer, prompts, outline rail.
 const CHAT_CHROME_CSS = `
@@ -524,11 +533,11 @@ ${WORKING_DOTS}
 ${LOADERS}
 
 /* Queued messages: a dashed "not sent yet" row with a clock and label, quiet 26px icon actions; send-now keeps the accent. */
-[data-cp-part="queued"] { min-height: 36px !important; padding: 0 6px 0 12px !important; gap: 8px !important; border: 1px dashed var(--cp-rule) !important; border-radius: 12px !important; background-color: transparent !important; }
+[data-cp-part="queued"] { min-height: 36px !important; padding: 0 6px 0 12px !important; gap: 8px !important; align-items: center !important; box-sizing: border-box !important; border: 1px dashed var(--cp-rule) !important; border-radius: 12px !important; background-color: transparent !important; }
 [data-cp-part="queued"]::before { content: ""; order: -2; flex-shrink: 0; width: 13px; height: 13px; background-color: var(--cp-muted); -webkit-mask: ${CLOCK_MASK} center / contain no-repeat; mask: ${CLOCK_MASK} center / contain no-repeat; }
 [data-cp-part="queued"]::after { content: "Queued"; order: -1; flex-shrink: 0; font-size: 11px; color: var(--cp-muted); }
 [data-cp-part="queued"] > div:first-child { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px !important; color: var(--cp-fg) !important; }
-[data-cp-part="queued"] > div:last-child { gap: 0 !important; }
+[data-cp-part="queued"] > div:last-child { gap: 0 !important; align-items: center !important; }
 /* The actions are matched by position (edit, then send-now): Paseo builds differ in their tags and labels. */
 [data-cp-part="queued"] > div:last-child > * { width: 26px !important; height: 26px !important; min-width: 0 !important; border: 0 !important; border-radius: 8px !important; background-color: transparent !important; box-shadow: none !important; }
 [data-cp-part="queued"] > div:last-child > * * { background-color: transparent !important; }
@@ -542,14 +551,27 @@ ${LOADERS}
 [data-cp-part="queued"] > div:last-child > :is(:disabled, [aria-disabled="true"]):hover { background-color: transparent !important; }
 
 /* Popovers that open with no motion (pickers, the context card, the outline preview) rise in; Paseo's menus already animate. */
-@keyframes cp-pop { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: none; } }
-${POPOVER} { animation: cp-pop 160ms cubic-bezier(0.23, 1, 0.32, 1) both !important; }
+@keyframes cp-pop { from { opacity: 0; transform: translateY(2px) scale(0.99); } to { opacity: 1; transform: none; } }
+${POPOVER} { animation: cp-pop 40ms cubic-bezier(0.16, 1, 0.3, 1) both !important; }
+/* Menus open quickly; dismiss them immediately without a closing transition. */
+${SURFACE} { transition: none !important; animation-duration: 40ms !important; }
+${SURFACE}:is([hidden], [aria-hidden="true"], [data-state="closed"], [style*="opacity: 0"], [style*="-9999"]),
+[data-testid="chat-outline-preview"]:is([hidden], [aria-hidden="true"], [data-state="closed"], [style*="opacity: 0"], [style*="-9999"]) { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { ${POPOVER} { animation: none !important; } }
-/* Every floating surface shares one shape: all pickers, Paseo's menus, Command Center. Pickers the plugin doesn't redraw (mode, project, settings selects) also get inset rows. */
+/* Every floating surface shares one shape: all pickers, menus/listboxes, and Command Center. */
 ${SURFACE} { border-radius: 12px !important; border-color: var(--colors-border) !important; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important; }
+[data-cp-setting-menu] { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22) !important; }
 /* Dark raised sits too close to the page (1.15:1), so dark themes lift surfaces to control; light themes keep raised (white), as control is darker than the page there. */
 ${SURFACE} { background-color: var(--cp-control) !important; }
 :root:is(.light, .pluginLight) ${SURFACE} { background-color: var(--cp-raised) !important; }
+${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]) { border-radius: 16px !important; }
+/* Reset inherited cursor styles throughout the popup; restore pointer only across active rows. */
+${SURFACE}, ${SURFACE} * { cursor: default !important; }
+${SURFACE} :is(input, textarea, [contenteditable="true"]) { cursor: text !important; }
+${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]):not(:disabled):not([aria-disabled="true"]),
+${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]):not(:disabled):not([aria-disabled="true"]) * { cursor: pointer !important; }
+${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible, [aria-selected="true"]) { background-color: color-mix(in srgb, var(--cp-control), var(--cp-fg) 12%) !important; }
+:root:is(.light, .pluginLight) ${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible, [aria-selected="true"]) { background-color: color-mix(in srgb, var(--cp-raised), var(--cp-fg) 8%) !important; }
 /* Paseo lights a row with the raised color, which would vanish on a raised surface; markLitRows tags it to draw it a step up. */
 [data-cp-lit] { background-color: color-mix(in srgb, var(--cp-control), var(--cp-fg) 12%) !important; }
 :root:is(.light, .pluginLight) [data-cp-lit] { background-color: color-mix(in srgb, var(--cp-raised), var(--cp-fg) 8%) !important; }
@@ -568,6 +590,7 @@ ${SURFACE} { background-color: var(--cp-control) !important; }
 [data-testid="agent-chat-scroll"] > div > :not(:last-child) { overflow-anchor: none !important; }
 
 [data-testid="message-input-root"] > div:first-child { border-radius: 12px !important; padding: 14px 10px 10px 16px !important; gap: 20px !important; }
+@supports (corner-shape: squircle) { [data-testid="message-input-root"] > div:first-child { border-radius: 28px !important; corner-shape: squircle; } }
 /* Paseo keeps the box two lines tall even when empty; let it size to its text instead (one line, up to 400px). */
 /* Paseo pulls the toolbar 6px past both sides; keep it on the left (the + lines up with the text) but not the right, so Send sits as far from the edge as from the bottom. */
 [data-testid="message-input-root"] > div:first-child > div:last-child { margin-right: 0 !important; }
@@ -583,7 +606,7 @@ button[aria-label="Stop agent"] { background-color: var(--cp-control) !important
 button[aria-label="Stop agent"] svg { width: 11px !important; height: 11px !important; stroke: var(--cp-fg) !important; fill: var(--cp-fg) !important; }
 :is([data-testid="subagents-track-header"], [data-testid="composer-diff-stat-pill"]) { height: 24px !important; padding: 0 10px !important; border-radius: 999px !important; border-color: var(--cp-rule) !important; }
 
-${PERMISSION}, ${QUESTION} { padding: 12px 14px !important; border-color: var(--cp-rule) !important; }
+${PERMISSION}, ${QUESTION} { padding: 12px 14px !important; border-color: var(--cp-rule) !important; border-radius: 12px !important; }
 ${PERMISSION} > div:first-child, [data-testid="question-form-current-question"] { font-weight: 500 !important; color: var(--cp-fg) !important; }
 [data-cp-part="permission-body"] > div > div:first-child { background-color: var(--cp-sunken) !important; border: 1px solid var(--cp-rule) !important; border-radius: 8px !important; overflow: hidden !important; }
 [data-testid="permission-request-question"] { font-size: 12px !important; margin: 0 !important; }
@@ -612,7 +635,7 @@ ${PLAN} > div:last-child { padding: 10px 16px 12px !important; border-top: 1px s
 [data-cp-part="outline-preview"] * { font-size: 13px !important; }
 
 /* Context window hover card: caps label, big percent with a bar (from data-cp-pct), plan pill, rounded limit bars, footer under a hairline. */
-${CTX} { padding: 14px !important; gap: 14px !important; border-radius: 12px !important; border: 1px solid var(--cp-rule) !important; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important; }
+${CTX} { padding: 14px !important; gap: 14px !important; border-radius: 12px !important; border: 1px solid var(--cp-rule) !important; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3) !important; }
 ${CTX_HEAD} { display: grid !important; grid-template-columns: auto 1fr; column-gap: 6px; row-gap: 6px; align-items: baseline; }
 ${CTX_HEAD} > :nth-child(1) { grid-column: 1 / -1; font-size: 11px !important; font-weight: 600 !important; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cp-muted) !important; }
 ${CTX_HEAD} > :nth-child(2) { grid-column: 1; grid-row: 2; }
@@ -659,7 +682,7 @@ const NATIVE_CSS = `
 /* The field draws focus; an input inside a wrapper field stays see-through. */
 [data-cp-set-input] { outline: none !important; }
 [data-cp-set-input]:not([data-cp-set]) { background-color: transparent !important; }
-@supports (corner-shape: squircle) { [data-cp-set="card"] { border-radius: 16px !important; corner-shape: squircle; } }
+@supports (corner-shape: squircle) { [data-cp-set="card"] { border-radius: 28px !important; corner-shape: squircle; } }
 /* Paseo's keyboard focus ring is its brand green on every theme; follow the theme's accent instead. */
 :focus-visible { outline-color: var(--cp-accent, var(--colors-accent)) !important; }
 ${ROW} > button { padding: 2px 8px 2px 12px !important; }
@@ -703,12 +726,14 @@ ${ROW} > button { background-color: transparent !important; border-color: transp
 [data-testid="tool-call-badge"] { margin-bottom: 10px !important; }
 
 [data-testid="user-message"] > div > div:first-child { padding: 10px 14px !important; border-radius: 16px !important; }
+@supports (corner-shape: squircle) { [data-testid="user-message"] > div > div:first-child { border-radius: 28px !important; corner-shape: squircle; } }
 /* Prompts take at most 60% of the chat (never under 360px, so they stay readable in a narrow pane). */
 [data-testid="user-message"] > div { max-width: max(60%, min(100%, 360px)) !important; }
 /* Attachments leave the bubble: thumbnails and file cards stack above it, right-aligned, and the bubble wraps only the text.
    tagParts marks the bubble (data-cp-attach) and each row: att-images (thumbnails) or att-files (issues, PRs, reviews, text). */
 [data-cp-attach] { display: flex !important; flex-direction: column !important; align-items: flex-end !important; gap: 6px; padding: 0 !important; border-radius: 0 !important; background-color: transparent !important; }
 [data-cp-attach] > [data-message-text] { padding: 10px 14px; border-radius: 16px; background-color: var(--colors-surface3); }
+@supports (corner-shape: squircle) { [data-cp-attach] > [data-message-text] { border-radius: 28px; corner-shape: squircle; } }
 [data-cp-attach] > :is([data-cp-part="att-images"], [data-cp-part="att-files"]) { justify-content: flex-end !important; gap: 6px !important; margin: 0 !important; }
 [data-cp-part="att-images"] > * { width: 104px !important; height: 104px !important; border-radius: 12px !important; border: 1px solid var(--cp-rule) !important; transition: filter 120ms; }
 [data-cp-part="att-images"] > :only-child { width: 240px !important; height: 160px !important; }
@@ -948,7 +973,7 @@ const PARTS: Array<[string, (el: DomElement) => DomElement | null | undefined, s
   // The timeline item around each reply block, which holds Paseo's gap between blocks.
   ['[data-testid="assistant-message"]', (el) => el.parentElement, "msg-item"],
   // Paseo's dropdown menus share no marker; the nearest testID above an item is the menu's surface.
-  ['[role="menuitem"]', (el) => el.parentElement?.closest("[data-testid]"), "menu"],
+  ['[role="menuitem"]', (el) => el.closest('[role="menu"]') ?? el.parentElement?.closest("[data-testid]"), "menu"],
   ['[data-testid="turn-working-indicator"] > div > div:first-child > div > div', (el) => el, "loader"],
   // The vertical scroller of a tool call's details; its depth varies by tool.
   ['[data-testid="tool-call-badge"] > div:nth-child(2) [style*="max-height"]', (el) => el, "detail-scroll"],
@@ -968,6 +993,15 @@ const PARTS: Array<[string, (el: DomElement) => DomElement | null | undefined, s
 /** Tags the parts above, for selectors that would otherwise need :has() or a slow "X *". */
 const SETTINGS_PANE = '[data-testid="settings-detail-pane"]';
 const CLEAR = "rgba(0, 0, 0, 0)";
+
+/** Squircle the plugin's own surfaced cards in browsers that support it; native clients keep their fallback radius. */
+export function squircleCards() {
+  if (Platform.OS !== "web" || typeof document === "undefined") return () => {};
+  const style = document.createElement("style");
+  style.textContent = '@supports (corner-shape: squircle) { [data-cp-squircle="card"] { border-radius: 28px !important; corner-shape: squircle; } }';
+  document.head.appendChild(style);
+  return () => style.remove();
+}
 
 /**
  * Settings pages draw their cards, select triggers and text fields from generated styles, without testIDs. Tag each by what it draws,
@@ -1004,6 +1038,21 @@ function tagSettings(roots: DomElement[]) {
       if (el.tagName === "BUTTON" || el.getAttribute("role") === "button") {
         if (radius >= 10 && height >= 24 && height <= 48) el.setAttribute("data-cp-set", "control");
       } else if (el.getAttribute("role") === "alert" || (border && radius >= 8 && height >= 44)) el.setAttribute("data-cp-set", "card");
+    }
+
+  // Settings popovers may be portaled outside the pane and may not expose a menu/listbox role. Mark every visible floating
+  // surface while Settings is mounted, including semantic popups that were already tagged by another pass.
+  if (document.querySelector(SETTINGS_PANE))
+    for (const el of Array.from(document.querySelectorAll("*"))) {
+      if (el.hasAttribute("data-cp-setting-menu") || (el.hasAttribute("data-cp-part") && !el.matches(SURFACE)) || el.tagName === "BUTTON" || el.getAttribute("role") === "button") continue;
+      const style = getComputedStyle(el);
+      if (style.position !== "absolute" && style.position !== "fixed") continue;
+      if (parseFloat(style.borderTopWidth) < 1 || parseFloat(style.borderRadius) < 8 || style.backgroundColor === CLEAR) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 100 || rect.height < 24) continue;
+      if (el.querySelectorAll("button, [role=button], [role=option], [role=menuitem]").length < 1 && el.querySelectorAll("*").length < 4) continue;
+      if (!el.hasAttribute("data-cp-part")) el.setAttribute("data-cp-part", "menu");
+      el.setAttribute("data-cp-setting-menu", "");
     }
 }
 
@@ -1077,8 +1126,11 @@ function keepCardHeight(card: DomElement) {
   cardHeights ??= new Map(Object.entries(JSON.parse(localStorage.getItem(HEIGHTS_KEY) ?? "{}") as Record<string, number>));
   const id = activeAgentId() ?? "";
   if (card.querySelector('[data-testid^="usage-report-"]')) {
+    // Drop the previous placeholder before measuring. Otherwise a cached min-height masks shorter content,
+    // and the cache can only ever grow even after the context card's contents shrink.
+    card.style.removeProperty("min-height");
     const height = Math.round(card.getBoundingClientRect().height);
-    if (height > (cardHeights.get(id) ?? 0)) {
+    if (height > 0 && height !== cardHeights.get(id)) {
       cardHeights.delete(id);
       cardHeights.set(id, height);
       localStorage.setItem(HEIGHTS_KEY, JSON.stringify(Object.fromEntries([...cardHeights].slice(-50))));
@@ -1402,12 +1454,12 @@ ${THINKING_POP} button > div:nth-child(2) { flex: 1 1 auto !important; min-width
 [data-cp-default] { flex-shrink: 0; padding: 0 6px; border: 1px solid var(--cp-rule); border-radius: 999px; font-size: 11px; line-height: 16px; color: var(--cp-muted); }
 [data-cp-desc] { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--cp-muted); }
 [data-cp-hint] { position: absolute; right: 12px; bottom: calc(100% + 8px); padding: 3px 10px; border: 1px solid var(--cp-rule); border-radius: 999px; background: var(--cp-raised); font-size: 12px; line-height: 16px; white-space: nowrap; color: var(--cp-muted); pointer-events: none; }
-/* Pickers get continuous (squircle) corners where the browser draws them: a row's curve then runs parallel to the card's, which round
-   corners 4px apart can't. Concentric again: a 16px card, rows 4px inside its 1px border, 16 - 1 - 4 = 11px. Last, to win over the 12px above. */
+/* Popup surfaces use 20px squircles; nested surfaces keep their own radius scale. */
 @supports (corner-shape: squircle) {
-  ${POP}, ${THINKING_POP}, ${MODEL_POP} { border-radius: 16px !important; corner-shape: squircle; }
-  ${POP}:not([${TAG}="models"]) button { border-radius: 11px !important; corner-shape: squircle; }
-  ${MODEL_POP} :is([data-cp-part="rows"], [data-testid="model-profiles-empty"]) { border-radius: 9px !important; corner-shape: squircle; }
+  ${SURFACE}, ${THINKING_POP}, ${MODEL_POP}, ${CTX}, [data-testid="chat-outline-preview"], ${PERMISSION}, ${QUESTION} { border-radius: 20px !important; corner-shape: squircle; }
+  ${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[href]) { border-radius: 16px !important; corner-shape: squircle; }
+  ${PLAN} { border-radius: 24px !important; corner-shape: squircle; }
+  ${MODEL_POP} :is([data-cp-part="rows"], [data-testid="model-profiles-empty"]) { border-radius: 21px !important; corner-shape: squircle; }
 }
 `;
 

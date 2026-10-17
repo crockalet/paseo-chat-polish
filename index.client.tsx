@@ -8,7 +8,7 @@ import { hideableKind, imageData, turnMarkdown, imagesSchema, noticeData, notice
 import { followAgent, isTodo, onStaleSteps, onUnplacedStep, placeStep, resetMade, setStepSkip, stepKey, type Phase } from "./client/steps";
 import { currentPrefs, savePrefs, setPrefs, subscribePrefs, usePrefsSaver } from "./client/prefs";
 import { bindThemeRegistry, currentTheme, registerTheme } from "./client/theme-registry";
-import { bindPromptKeys, clampUserMessages, jumpToPrompt, openAgentIds, paintSidebar, setCompactHandler, readHostAppearance, restyleNative, selectionCopyMenu, setNativeColors, setRailProviders, setRichText, watchDom } from "./client/web";
+import { bindPromptKeys, clampUserMessages, jumpToPrompt, openAgentIds, paintSidebar, setCompactHandler, readHostAppearance, restyleNative, selectionCopyMenu, setNativeColors, setRailProviders, setRichText, squircleCards, watchDom } from "./client/web";
 import { getTheme, THEME_CATALOG_ID, themeSchema } from "./shared/theme";
 import { getPrefs, type Prefs } from "./shared/timeline";
 import { ImagesItem, NoticeItem, PlanItem, RecapItem, StepsItem, ThoughtItem, TodoItem, ToolItem } from "./client/views";
@@ -46,6 +46,7 @@ export default function contribute(client: PluginClientContext) {
   });
 
   const unrestyle = restyleNative(() => currentPrefs().nativeStyle === "design");
+  const unsquircleCards = squircleCards();
   const unclamp = clampUserMessages(() => currentPrefs().userMessages === "clamp");
   const unselect = selectionCopyMenu(() => currentPrefs().selectionCopy === "on");
 
@@ -280,6 +281,7 @@ export default function contribute(client: PluginClientContext) {
     unselect();
     unsubscribeProviders();
     unrestyle();
+    unsquircleCards();
     unbindTheme();
   };
 }

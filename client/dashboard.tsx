@@ -16,6 +16,7 @@ import { alpha, AppearanceOverride, CodeLine, ImagesItem, MergedSteps, PMONO, su
 import { canSetAppTheme, DEFAULTS, PASEO_FONT_STACKS, readHostAppearance, readSyntaxTheme, setAppTheme, updateAppSettings } from "./web";
 
 type ToolCall = Extract<AgentTimelineItem, { type: "tool_call" }>;
+const SQUIRCLE_CARD = { dataSet: { cpSquircle: "card" } } as object;
 const call = (detail: ToolCall["detail"], extra?: Partial<ToolCall>) =>
   ({ type: "tool_call", callId: "preview", name: "preview", status: "completed", error: null, detail, ...extra }) as ToolCall;
 
@@ -271,7 +272,7 @@ function Group({ theme, title, top, children }: { theme: PluginTheme; title: str
     <View style={{ gap: 10 }}>
       <SectionHead theme={theme} title={title} />
       {top}
-      <View style={{ borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: "hidden" }}>{children}</View>
+      <View {...SQUIRCLE_CARD} style={{ borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: "hidden" }}>{children}</View>
     </View>
   );
 }
@@ -318,7 +319,7 @@ function RestyleCard({ theme, prefs, onChange }: { theme: PluginTheme; prefs: Pr
   const s = useStyles(theme);
   const c = theme.colors;
   return (
-    <View style={{ gap: 6, padding: 10, borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
+    <View {...SQUIRCLE_CARD} style={{ gap: 6, padding: 10, borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Icon name="Paintbrush" size={14} color={c.foregroundMuted} />
         <Text style={[s.verb, { flex: 1, fontSize: 13 }]}>Restyle Paseo's items</Text>
@@ -370,7 +371,7 @@ function UpdateCardView({ theme, status, phase, error, onUpdate }: { theme: Plug
   const review = status.links[0];
   const press = ({ pressed }: { pressed: boolean }) => ({ opacity: reducedMotion && pressed ? 0.8 : 1, transform: pressed && !reducedMotion ? [{ scale: 0.97 }] : undefined });
   return (
-    <View style={{ gap: 10, padding: 12, borderRadius: 12, backgroundColor: alpha(tone, 0.08), borderWidth: 1, borderColor: alpha(tone, 0.24) }}>
+    <View {...SQUIRCLE_CARD} style={{ gap: 10, padding: 12, borderRadius: 12, backgroundColor: alpha(tone, 0.08), borderWidth: 1, borderColor: alpha(tone, 0.24) }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <View style={{ width: 28, height: 28, borderRadius: 999, backgroundColor: alpha(tone, 0.16), alignItems: "center", justifyContent: "center" }}>
           {phase === "updating" ? <ActivityIndicator size="small" color={tone} /> : <Icon name={phase === "restarting" ? "Check" : error ? "TriangleAlert" : "ArrowDownToLine"} size={14} color={tone} />}
@@ -497,6 +498,7 @@ function ThemeTile({ theme, name, halves, selected, active, onPress }: { theme: 
       accessibilityLabel={name}
       accessibilityState={{ selected }}
       onPress={onPress}
+      {...SQUIRCLE_CARD}
       style={{ flex: 1, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface1, borderWidth: selected ? 1.5 : StyleSheet.hairlineWidth, borderColor: selected ? c.accent : c.border }}
     >
       <View style={{ flexDirection: "row", height: 42 }}>
@@ -574,7 +576,7 @@ function TypographySection({ theme, typo, setTypo }: { theme: PluginTheme; typo:
   return (
     <View style={{ gap: 10 }}>
       <SectionHead theme={theme} title="Typography" hint="Settings → Appearance" />
-      <View style={{ borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
+      <View {...SQUIRCLE_CARD} style={{ borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
         <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 12, padding: 12 }}>
           {box(<Text style={[s.title, { fontSize: 15 }, { "--paseo-ui-font": typo.uiFont || PASEO_FONT_STACKS.ui } as object]}>Ag</Text>)}
           {field("Interface font", "uiFont", false)}
@@ -614,6 +616,7 @@ function ColorTile({ theme, token, draft, selected, onPress }: { theme: PluginTh
       accessibilityState={{ selected }}
       disabled={!onPress}
       onPress={onPress}
+      {...SQUIRCLE_CARD}
       style={{ flex: 1, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface1, borderWidth: selected ? 1.5 : StyleSheet.hairlineWidth, borderColor: selected ? c.accent : c.border }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 44, paddingHorizontal: 10, backgroundColor: text ? draft.colors.background : color }}>
@@ -642,7 +645,7 @@ function ColorRow({ theme, name, hint, color, text, bad, accent, onText }: { the
   const s = useStyles(theme);
   const c = theme.colors;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
+    <View {...SQUIRCLE_CARD} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 10, backgroundColor: c.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
       <View style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: color, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }} />
       <View style={{ flex: 1, gap: 1 }}>
         <Text {...PMONO} style={[s.code, { fontSize: 12, color: c.foreground }]}>{name}</Text>
@@ -1327,6 +1330,7 @@ function PreviewBubble({ theme, clamp }: { theme: PluginTheme; clamp: boolean })
   return (
     <View style={{ alignItems: "flex-end", paddingBottom: 8 }}>
       <Pressable
+        {...SQUIRCLE_CARD}
         disabled={!clamp}
         onPress={() => setOpen(!open)}
         accessibilityRole={clamp ? "button" : undefined}
@@ -1414,7 +1418,7 @@ function MockChat({ theme, layout, viewport, children }: { theme: PluginTheme; l
   );
   const narrow = layout.compact || viewport === "phone";
   return (
-    <View style={{ width: viewport === "phone" ? 390 : "100%", alignSelf: "center", borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface0, overflow: "hidden" }}>
+    <View {...SQUIRCLE_CARD} style={{ width: viewport === "phone" ? 390 : "100%", alignSelf: "center", borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface0, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: alpha(c.border, 0.6) }}>
         <Text style={[s.target, { color: c.foreground, fontSize: 13, fontWeight: "500" }]}>Refactor auth middleware</Text>
         <Text style={[s.target, { fontSize: 12 }]} numberOfLines={1}>
@@ -1422,7 +1426,7 @@ function MockChat({ theme, layout, viewport, children }: { theme: PluginTheme; l
         </Text>
       </View>
       <View style={{ paddingHorizontal: narrow ? 16 : 40, paddingVertical: 24, gap: 16 }}>{children}</View>
-      <View style={{ margin: 20, marginTop: 4, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 14, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface1 }}>
+      <View {...SQUIRCLE_CARD} style={{ margin: 20, marginTop: 4, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 14, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface1 }}>
         <Text style={[s.prose, { fontSize: 14 }]} numberOfLines={1}>
           Message the agent, tag @files, or use /commands
         </Text>
@@ -1447,7 +1451,7 @@ function CodeView({ theme, layout, viewport, props }: { theme: PluginTheme; layo
   const s = useStyles(theme);
   const c = theme.colors;
   return (
-    <View style={{ width: viewport === "phone" ? 390 : "100%", alignSelf: "center", gap: 16, padding: layout.compact || viewport === "phone" ? 12 : 20, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface0 }}>
+    <View {...SQUIRCLE_CARD} style={{ width: viewport === "phone" ? 390 : "100%", alignSelf: "center", gap: 16, padding: layout.compact || viewport === "phone" ? 12 : 20, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.surface0 }}>
       <MergedSteps {...props} defaultOpen />
       <Text style={[s.prose, { color: c.foreground }]}>I wrote auth.ts and changed its 401 to 403. The final file:</Text>
       <View style={s.block}>

@@ -32,14 +32,37 @@ The Theme page previews code too. The Code tab draws the same rows the chat uses
 Requires Paseo 0.11.2 or later.
 
 ```sh
-paseo plugin install paseo-chat-polish
+paseo plugin add lthieu96/chat-polish
 ```
 
-Or straight from GitHub: `paseo plugin install https://github.com/lthieu96/paseo-chat-polish`.
+Install directly from GitHub instead:
+
+```sh
+paseo plugin add github:lthieu96/paseo-chat-polish
+```
+
+To install a specific GitHub release, pass its tag, such as `--ref v0.1.0`.
 
 ## Update
 
-When a newer commit (GitHub install) or version (registry or npm) is out, the dashboard sidebar shows **Update available**. Press **Update** and Paseo installs it and restarts the plugin. From a terminal: `paseo plugin update paseo-chat-polish`. A copy installed from a local folder only reloads.
+The dashboard sidebar shows **Update available** when a newer revision is available. Press **Update** and Paseo installs it and restarts the plugin. From a terminal:
+
+```sh
+paseo plugin update paseo-chat-polish
+```
+
+Registry installs use the revision approved for the listing. Direct GitHub installs update from the repository's default branch.
+
+## Release
+
+Update the version in `package.json` and `package-lock.json`, commit it, then push a matching tag. The workflow typechecks and tests the plugin, then creates a GitHub Release with generated notes:
+
+```sh
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+To update the Paseo Registry listing, submit the new GitHub tag as a revision through the [plugin submission form](https://github.com/getpaseo/plugins/issues/new?template=submit-plugin.yml). Registry updates are reviewed before users receive the new revision.
 
 ## Limitations
 

@@ -107,7 +107,10 @@ test("DOM restyling, accordion transitions, and bottom following stay stable", {
           const content = chat.firstElementChild, expanding = chat.querySelector('[data-cp-expand]');
           chat.scrollTop = chat.scrollHeight; await wait();
           // Paseo 0.11.4 follows content resizing in the next animation frame.
-          const hostFollow = new ResizeObserver(() => requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; }));
+          let hostFollowing = true;
+          const hostFollow = new ResizeObserver(() => requestAnimationFrame(() => {
+            if (hostFollowing) chat.scrollTop = chat.scrollHeight;
+          }));
           hostFollow.observe(content); await wait();
           chat.querySelector('button').focus({ preventScroll: true });
           web.followExpansionAtBottom();
@@ -121,6 +124,7 @@ test("DOM restyling, accordion transitions, and bottom following stay stable", {
             expanding.getBoundingClientRect(); await wait(30);
           }
           checks.expansionStaysAtBottom = gaps.length > 0 && gaps.every((gap) => Math.abs(gap) <= 1);
+          hostFollowing = false;
           beforePaint.disconnect(); hostFollow.disconnect();
           reveal.forEach((animation) => animation.finish());
           chat.dispatchEvent(new WheelEvent('wheel', { deltaY: -80, bubbles: true }));

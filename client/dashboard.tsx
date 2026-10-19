@@ -3,10 +3,11 @@ import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/cl
 import { Icon, ScrollView, TextInput } from "@getpaseo/plugin/client/react-native";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import { useEffect, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View, type DimensionValue, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, Image, Linking, Platform, Pressable, StyleSheet, Text, View, type DimensionValue, type LayoutChangeEvent } from "react-native";
 import { contrast, isHex, PRESETS, THEME_CATALOG_ID, themeSchema, themeSettings, TOKEN_ROLES, TOKENS, type ThemeDraft, type Token } from "../shared/theme";
 import { HIDEABLE, ICON_KINDS, LOADERS, prefsSettings, RICH_TEXT, type Hideable, type IconKind, type Loader, type Prefs, type RichText } from "../shared/timeline";
 import { applyUpdate, checkUpdate, type UpdateStatus } from "../shared/update";
+import { APP_ICON } from "./mark";
 import { hideableKind, todoData, toolData } from "./model";
 import { setTodoChanges } from "./steps";
 import { PrefsOverride, setPrefs, usePrefs } from "./prefs";
@@ -442,9 +443,13 @@ function InnerNav({ theme, host, page, prefs, onSelect, onPrefs }: { theme: Plug
   return (
     <View style={{ width: 248, paddingHorizontal: 12, paddingVertical: 20, gap: 24, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.border }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8 }}>
-        <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: c.accent, alignItems: "center", justifyContent: "center" }}>
-          <Icon name="Sparkles" size={14} color={c.accentForeground} />
-        </View>
+        {Platform.OS === "web" ? (
+          <Image source={{ uri: APP_ICON }} style={{ width: 24, height: 24 }} />
+        ) : (
+          <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: c.accent, alignItems: "center", justifyContent: "center" }}>
+            <Icon name="Sparkles" size={14} color={c.accentForeground} />
+          </View>
+        )}
         <View>
           <Text style={[s.title, { fontSize: 14 }]}>Chat Polish</Text>
           <Text style={[s.small, { fontSize: 11 }]}>Paseo plugin</Text>

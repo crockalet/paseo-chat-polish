@@ -5,6 +5,7 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { Dashboard } from "./client/dashboard";
 import { clearImageCache } from "./client/images";
+import { sidebarIcon } from "./client/mark";
 import { hideableKind, imageData, turnMarkdown, imagesSchema, noticeData, noticeSchema, planSchema, stepsSchema, thoughtSchema, todoData, todoSchema, toolData, toolSchema } from "./client/model";
 import { followAgent, isTodo, onStaleSteps, onUnplacedStep, placeStep, resetMade, setStepSkip, stepKey, type Phase } from "./client/steps";
 import { currentPrefs, savePrefs, setPrefs, subscribePrefs, usePrefsSaver } from "./client/prefs";
@@ -29,7 +30,7 @@ function DashboardItem({ currentScreen, openScreen, theme }: PluginSidebarItemPr
   useEffect(() => {
     toast = hostToast;
   }, [hostToast]);
-  return <SidebarRow icon="Sparkles" active={currentScreen?.screenId === "dashboard"} onPress={() => openScreen({ screenId: "dashboard" })} />;
+  return <SidebarRow icon={sidebarIcon} active={currentScreen?.screenId === "dashboard"} onPress={() => openScreen({ screenId: "dashboard" })} />;
 }
 
 export default function contribute(client: PluginClientContext) {

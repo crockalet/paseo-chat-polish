@@ -2,6 +2,7 @@
   "id": "paseo-chat-polish",
   "name": "Chat Polish",
   "description": "Customize Paseo's chat timeline, rich text, themes and fonts from a live preview dashboard.",
+  "icon": "images/icon.png",
   "media": [],
   "requirements": {
     "paseo": ">=0.11.2"

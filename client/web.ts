@@ -37,6 +37,7 @@ interface DomElement {
   appendChild(el: DomElement): void;
   insertAdjacentElement(where: "afterend" | "beforeend", el: DomElement): void;
   click(): void;
+  cloneNode(deep: true): DomElement;
   getBoundingClientRect(): { top: number; left: number; right: number; bottom: number; width: number; height: number };
 }
 declare const document: {
@@ -46,6 +47,8 @@ declare const document: {
   createElement(tag: "style" | "div" | "span" | "button"): DomElement;
   addEventListener(type: "click", listener: (event: { target: unknown; clientX: number; clientY: number }) => void, capture?: boolean): void;
   removeEventListener(type: "click", listener: (event: { target: unknown; clientX: number; clientY: number }) => void, capture?: boolean): void;
+  addEventListener(type: "pointerover", listener: (event: { target: unknown }) => void, capture?: boolean): void;
+  removeEventListener(type: "pointerover", listener: (event: { target: unknown }) => void, capture?: boolean): void;
   elementsFromPoint(x: number, y: number): DomElement[];
   addEventListener(type: "keydown", listener: (event: KeyEvent) => void, capture?: boolean): void;
   removeEventListener(type: "keydown", listener: (event: KeyEvent) => void, capture?: boolean): void;
@@ -66,6 +69,7 @@ type MessageListener = (event: { source: unknown; data: unknown }) => void;
 declare const window: { addEventListener(type: "message", listener: MessageListener): void; removeEventListener(type: "message", listener: MessageListener): void };
 declare function requestAnimationFrame(cb: () => void): number;
 declare function getComputedStyle(el: DomElement): {
+  transform: string;
   borderRightWidth: string;
   borderRightStyle: string;
   borderLeftWidth: string;
@@ -216,7 +220,8 @@ interface DomWatcher {
   added?: (roots: DomElement[]) => void;
   /** Runs at most every 250ms once mutations settle (they stream in while agents run). */
   settled?: (textRoots: DomElement[]) => void;
-  removed?: () => void;
+  /** Runs before the browser paints, with the elements just removed and the parents they left. */
+  removed?: (nodes: Array<{ el: DomElement; from: DomElement }>) => void;
 }
 
 // One observer for every watcher: Paseo mutates the DOM on each streamed token.
@@ -243,10 +248,10 @@ export function watchDom(watcher: DomWatcher, cleanup: () => void) {
     observer = new MutationObserver((records) => {
       const roots: DomElement[] = [];
       const settings = records.some((r) => r.attributeName) && document.querySelector(SETTINGS_PANE);
-      let removed = false;
+      const removed: Array<{ el: DomElement; from: DomElement }> = [];
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) if ((node as { nodeType?: number }).nodeType === 1) roots.push(node as DomElement);
-        removed ||= record.removedNodes.length > 0;
+        for (const node of Array.from(record.removedNodes)) if ((node as { nodeType?: number }).nodeType === 1) removed.push({ el: node as DomElement, from: record.target as DomElement });
         const node = record.target as { nodeType: number; parentElement: DomElement | null };
         const target = node.nodeType === 1 ? record.target as DomElement : node.parentElement;
         if (!target) continue;
@@ -258,7 +263,7 @@ export function watchDom(watcher: DomWatcher, cleanup: () => void) {
       }
       const added = distinctRoots(roots);
       if (added.length) for (const w of watchers) w.added?.(added);
-      if (removed) for (const w of watchers) w.removed?.();
+      if (removed.length) for (const w of watchers) w.removed?.(removed);
       settleTimer ??= setTimeout(settle, 250);
     });
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden", "aria-hidden", "aria-expanded", "data-state"] });
@@ -556,7 +561,7 @@ const CLOCK_MASK = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="ht
 // the open card (FadeIn in its style) rises in.
 // Floating surfaces drawn alike: pickers, Paseo's menus (tagged by tagParts), Command Center.
 const SURFACE = ':is([data-testid="combobox-desktop-container"], [data-cp-part="menu"], [role="menu"], [role="listbox"], [data-testid="command-center-panel"])';
-const POPOVER = `:is(:is([data-testid="combobox-desktop-container"], [data-testid="chat-outline-preview"]):not([style*="opacity: 0"]), [data-testid="context-window-details"][style*="FadeIn"], :is([data-cp-part="menu"], [role="menu"], [role="listbox"]):not([hidden]):not([aria-hidden="true"]):not([data-state="closed"]):not([style*="opacity: 0"])):not([style*="-9999"])`;
+const POPOVER = `:is(:is([data-testid="combobox-desktop-container"], [data-testid="chat-outline-preview"]):not([style*="opacity: 0"]), [data-testid="context-window-details"][style*="FadeIn"], :is([data-cp-part="menu"], [role="menu"], [role="listbox"]):not([hidden]):not([aria-hidden="true"]):not([data-state="closed"]):not([style*="opacity: 0"])):not([style*="-9999"], [style*="FadeOut"], [data-cp-glide], [data-cp-swap], [data-cp-ghost])`;
 
 // The chat's own chrome from the "Chat Surfaces" design: turn footer, composer, prompts, outline rail.
 const CHAT_CHROME_CSS = `
@@ -613,6 +618,26 @@ ${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[hr
 /* Paseo lights a row with the raised color, which would vanish on a raised surface; markLitRows tags it to draw it a step up. */
 [data-cp-lit] { background-color: color-mix(in srgb, var(--cp-control), var(--cp-fg) 12%) !important; }
 :root:is(.light, .pluginLight) [data-cp-lit] { background-color: color-mix(in srgb, var(--cp-raised), var(--cp-fg) 8%) !important; }
+/* The sidebar's workspace hover card is a menu too (role=menu), but its rows ran edge to edge, so their 16px hover fill missed the
+   card's corners. Inset them 4px like menu rows: 28px tall, 13px text, 14px icons, title 13/600, divider inset too. */
+[data-cp-part="ws-card"] { padding: 4px !important; }
+[data-cp-part="ws-card"] > * { min-height: 28px !important; padding: 0 8px !important; gap: 8px !important; align-items: center !important; }
+[data-cp-part="ws-card"] > :first-child { min-height: 0 !important; padding: 8px 8px 6px !important; }
+[data-cp-part="ws-card"] > :empty { min-height: 0 !important; height: 1px !important; margin: 4px 0 !important; padding: 0 !important; background-color: var(--cp-rule, var(--colors-border)) !important; }
+[data-cp-part="ws-card"] svg { width: 14px !important; height: 14px !important; flex-shrink: 0; }
+[data-cp-part="ws-card"] [dir] { font-size: 13px !important; line-height: 18px !important; }
+[data-cp-part="ws-card"] > :first-child [dir] { font-weight: 600 !important; color: var(--cp-fg) !important; }
+/* Between sessions only the newest card shows, gliding from the last one (watchHoverCards). */
+[data-cp-gone] { visibility: hidden !important; }
+@keyframes cp-glide-a { from { transform: translateY(var(--cp-from)); } }
+@keyframes cp-glide-b { from { transform: translateY(var(--cp-from)); } }
+[data-cp-part="ws-card"][data-cp-glide="a"]:not([style*="FadeOut"]) { animation: cp-glide-a 100ms cubic-bezier(0.33, 1, 0.68, 1) both !important; }
+[data-cp-part="ws-card"][data-cp-glide="b"]:not([style*="FadeOut"]) { animation: cp-glide-b 100ms cubic-bezier(0.33, 1, 0.68, 1) both !important; }
+@keyframes cp-icon-a { from { opacity: 0; transform: scale(0.5); } }
+@keyframes cp-icon-b { from { opacity: 0; transform: scale(0.5); } }
+[data-cp-part="ws-card"][data-cp-swap="a"] svg { animation: cp-icon-a 100ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+[data-cp-part="ws-card"][data-cp-swap="b"] svg { animation: cp-icon-b 100ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@media (prefers-reduced-motion: reduce) { [data-cp-part="ws-card"]:is([data-cp-glide], [data-cp-swap]), [data-cp-part="ws-card"][data-cp-swap] svg { animation: none !important; } }
 /* Command Center keeps its taller palette rows, inset like every other surface's. */
 [data-testid="command-center-panel"] button { margin: 0 6px !important; padding: 8px 10px !important; border-radius: 6px !important; }
 [data-testid="combobox-desktop-container"]:not([${TAG}]) > div:first-child > div { padding: 4px 12px !important; }
@@ -671,6 +696,14 @@ ${PLAN} > div:last-child { padding: 10px 16px 12px !important; border-top: 1px s
 [data-testid^="chat-outline-tick-"][aria-selected="true"] > div { background-color: var(--cp-accent) !important; }
 [data-testid="chat-outline-preview"] { background-color: var(--cp-raised) !important; border-radius: 12px !important; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important; }
 [data-cp-part="outline-preview"] * { font-size: 13px !important; }
+/* Between ticks, a copy of the last preview glides to the hovered tick until Paseo's next one takes over (ghostOutlinePreview). */
+[data-testid="chat-outline-preview"][data-cp-ghost] { pointer-events: none; animation: none !important; transition: transform 100ms cubic-bezier(0.33, 1, 0.68, 1), opacity 100ms ease-out !important; }
+[data-cp-ghost="out"] { opacity: 0; }
+@keyframes cp-outline-in { from { transform: translateY(var(--cp-from, 0px)); } }
+@keyframes cp-text-in { from { opacity: 0.2; } }
+[data-testid="chat-outline-preview"][data-cp-swap] { animation: cp-outline-in 100ms cubic-bezier(0.33, 1, 0.68, 1) both !important; }
+[data-testid="chat-outline-preview"][data-cp-swap] > * { animation: cp-text-in 100ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { [data-testid="chat-outline-preview"]:is([data-cp-ghost], [data-cp-swap]), [data-cp-swap] > * { animation: none !important; transition: none !important; } }
 
 /* Context window hover card: caps label, big percent with a bar (from data-cp-pct), plan pill, rounded limit bars, footer under a hairline. */
 ${CTX} { padding: 14px !important; gap: 14px !important; border-radius: 12px !important; border: 1px solid var(--cp-rule) !important; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3) !important; }
@@ -1008,6 +1041,7 @@ const PARTS: Array<[string, (el: DomElement) => DomElement | null | undefined, s
   [`${PLAN} > button:first-child`, (el) => el, "plan-head"],
   ['[data-testid="chat-outline-preview"]', (el) => el, "outline-preview"],
   ['[data-testid="context-window-details"]', (el) => el, "context"],
+  ['[data-testid="workspace-hover-card"]', (el) => el, "ws-card"],
   // The timeline item around each reply block, which holds Paseo's gap between blocks.
   ['[data-testid="assistant-message"]', (el) => el.parentElement, "msg-item"],
   // Paseo's dropdown menus share no marker; the nearest testID above an item is the menu's surface.
@@ -1427,6 +1461,8 @@ export function restyleNative(enabled: () => boolean) {
     unthemeMermaid?.();
     unthemeMermaid = undefined;
     document.removeEventListener("click", noteClick, true);
+    document.removeEventListener("pointerover", notePointer, true);
+    dropGhost(false);
     for (const el of Array.from(document.querySelectorAll("[data-cp-rail], [data-cp-tip], [data-cp-hint]"))) el.remove();
   };
   return watchDom({
@@ -1439,12 +1475,19 @@ export function restyleNative(enabled: () => boolean) {
         const sheet = (style as unknown as { sheet?: { cssRules: ArrayLike<CssRuleLike> } }).sheet;
         if (sheet) guardRules(sheet.cssRules);
         document.addEventListener("click", noteClick, true);
+        document.addEventListener("pointerover", notePointer, true);
         unthemeMermaid = themeMermaid();
       }
       tagParts(roots);
       markBlocks(roots);
       decoratePopovers(roots);
       markLitRows(roots);
+      watchHoverCards(roots);
+      swapOutlinePreview(roots);
+    },
+    removed: (nodes) => {
+      if (hoverCards.size) syncHoverCards();
+      ghostOutlinePreview(nodes);
     },
     settled: (roots) => {
       if (!style) return;
@@ -1594,6 +1637,147 @@ function markLitRows(roots: DomElement[]) {
     };
     new MutationObserver(mark).observe(surface, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
     mark();
+  }
+}
+
+/**
+ * Moving between sessions, Paseo keeps each workspace hover card up 100ms after the pointer leaves its row and mounts the next one over
+ * it; as cards close it moves their content between elements and drops the spare one as a FadeOut exit copy. Only the card for the
+ * hovered row shows, gliding from where the shown card was drawn; exit copies show only once no card is left, so closing still fades.
+ */
+const WS_CARD = '[data-testid="workspace-hover-card"]';
+const WS_ROW = '[data-testid^="sidebar-workspace-row-"]';
+const GLIDE_MS = 100;
+const hoverCards = new Set<DomElement>();
+const placedAt = new WeakMap<DomElement, number>();
+let placements = 0;
+let hoveredRow: DomElement | undefined;
+/** The card on screen: its session, resting top, the offset its glide started from (ease-out cubic), and when. Elements come and go under it. */
+let shownCard: { el: DomElement; name: string; top: number; dy: number; at: number } | undefined;
+const isExit = (card: DomElement) => card.style.getPropertyValue("animation-name") === "FadeOut";
+const cardTop = (card: DomElement) => {
+  const top = card.style.getPropertyValue("top");
+  return !top || top.startsWith("-9999") || isExit(card) ? undefined : parseFloat(top);
+};
+
+function syncHoverCards() {
+  const placed: DomElement[] = [];
+  for (const card of hoverCards) {
+    if (!card.isConnected) hoverCards.delete(card);
+    else if (cardTop(card) !== undefined) placed.push(card);
+  }
+  const name = (card: DomElement) => card.querySelector('[data-testid="hover-card-workspace-name"]')?.textContent;
+  const hovered = hoveredRow?.isConnected ? placed.filter((card) => hoveredRow!.textContent?.includes(name(card) ?? "\0")) : [];
+  const target = (hovered.length ? hovered : placed).reduce<DomElement | undefined>((a, b) => (a && (placedAt.get(a) ?? 0) > (placedAt.get(b) ?? 0) ? a : b), undefined);
+  if (target) {
+    const top = cardTop(target)!;
+    const session = name(target) ?? "";
+    // Another session's card: its icons pop in as it glides over.
+    if (shownCard && shownCard.name !== session) target.setAttribute("data-cp-swap", target.getAttribute("data-cp-swap") === "a" ? "b" : "a");
+    if (shownCard) shownCard.name = session;
+    if (shownCard?.el !== target || shownCard.top !== top) {
+      const now = Date.now();
+      // Read where the shown card is drawn; once Paseo has dropped its element, work it out from the glide (ease-out cubic).
+      const matrix = shownCard?.el.isConnected ? getComputedStyle(shownCard.el).transform : "";
+      const drawn = matrix.startsWith("matrix(") ? Number(matrix.slice(7, -1).split(",")[5]) : undefined;
+      const left = shownCard ? Math.max(0, 1 - (now - shownCard.at) / GLIDE_MS) : 0;
+      const dy = shownCard ? shownCard.top + (drawn ?? shownCard.dy * left ** 3) - top : 0;
+      target.style.setProperty("--cp-from", `${dy}px`);
+      // Two identical keyframes, so a reused card restarts its glide without a forced reflow.
+      if (dy) target.setAttribute("data-cp-glide", target.getAttribute("data-cp-glide") === "a" ? "b" : "a");
+      shownCard = { el: target, name: session, top, dy, at: now };
+    }
+  } else shownCard = undefined;
+  for (const card of hoverCards) {
+    if (target && card !== target) card.setAttribute("data-cp-gone", "");
+    else card.removeAttribute("data-cp-gone");
+  }
+}
+
+function noteHoverCard(card: DomElement) {
+  const top = card.style.getPropertyValue("top");
+  if (cardTop(card) !== undefined && card.getAttribute("data-cp-top") !== top) {
+    card.setAttribute("data-cp-top", top);
+    placedAt.set(card, ++placements);
+  }
+  syncHoverCards();
+}
+
+const notePointer = (event: { target: unknown }) => {
+  const target = event.target as DomElement | null;
+  const row = target?.closest?.(WS_ROW);
+  if (row && row !== hoveredRow) (hoveredRow = row), hoverCards.size && syncHoverCards();
+  overTick = target?.closest?.(OUTLINE_TICK) ?? undefined;
+  if (ghost && overTick) moveGhost(overTick);
+};
+
+function watchHoverCards(roots: DomElement[]) {
+  for (const card of within(roots, WS_CARD)) {
+    if (hoverCards.has(card)) continue;
+    hoverCards.add(card);
+    if (!isExit(card)) new MutationObserver(() => noteHoverCard(card)).observe(card, { childList: false, subtree: false, attributes: true, attributeFilter: ["style"] });
+    noteHoverCard(card);
+  }
+}
+
+/**
+ * Paseo drops the chat outline preview as the pointer leaves a tick and mounts the next one 150ms after it rests on another. Meanwhile
+ * a copy of the old preview glides to the tick under the pointer; the new preview takes over from it with its text fading in. If the
+ * pointer leaves the rail instead, the copy fades out.
+ */
+const OUTLINE_PREVIEW = '[data-testid="chat-outline-preview"]';
+const OUTLINE_TICK = '[data-testid^="chat-outline-tick-"]';
+let overTick: DomElement | undefined;
+let ghost: { el: DomElement; tick: DomElement; timer?: ReturnType<typeof setTimeout> } | undefined;
+
+function dropGhost(fade: boolean) {
+  if (!ghost) return;
+  const { el, timer } = ghost;
+  clearTimeout(timer);
+  ghost = undefined;
+  if (!fade) return el.remove();
+  el.setAttribute("data-cp-ghost", "out");
+  setTimeout(() => el.remove(), 100);
+}
+
+/** Waits for Paseo's next preview while the pointer is on another tick; otherwise it has left the rail. */
+const waitGhost = () => {
+  if (!ghost) return;
+  clearTimeout(ghost.timer);
+  ghost.timer = setTimeout(() => dropGhost(true), overTick && overTick !== ghost.tick ? 400 : 60);
+};
+
+function moveGhost(tick: DomElement) {
+  if (!ghost) return;
+  ghost.el.style.setProperty("transform", `translateY(${tick.getBoundingClientRect().top - ghost.tick.getBoundingClientRect().top}px)`);
+  waitGhost();
+}
+
+function ghostOutlinePreview(removed: Array<{ el: DomElement; from: DomElement }>) {
+  const old = removed.find(({ el }) => el.matches(`${OUTLINE_PREVIEW}:not([data-cp-ghost])`));
+  // The preview sits beside its tick, in a wrapper of the two.
+  const tick = old?.from.isConnected ? old.from.querySelector(OUTLINE_TICK) : null;
+  if (!old || !tick || document.querySelector(`${OUTLINE_PREVIEW}:not([data-cp-ghost])`)) return;
+  dropGhost(false);
+  const el = old.el.cloneNode(true);
+  el.setAttribute("data-cp-ghost", "");
+  el.removeAttribute("data-cp-swap");
+  old.from.appendChild(el);
+  // Style it in place first, so moving it to another tick transitions.
+  el.getBoundingClientRect();
+  ghost = { el, tick };
+  if (overTick) moveGhost(overTick);
+  else waitGhost();
+}
+
+function swapOutlinePreview(roots: DomElement[]) {
+  if (!ghost) return;
+  for (const el of within(roots, `${OUTLINE_PREVIEW}:not([data-cp-ghost])`)) {
+    // Measured at rest: swapping first takes it out of the popover rise-in.
+    el.setAttribute("data-cp-swap", "");
+    el.style.setProperty("--cp-from", "0px");
+    el.style.setProperty("--cp-from", `${ghost.el.getBoundingClientRect().top - el.getBoundingClientRect().top}px`);
+    dropGhost(false);
   }
 }
 

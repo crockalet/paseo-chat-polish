@@ -637,7 +637,11 @@ ${SURFACE} :is(button, [role="button"], [role="menuitem"], [role="option"], a[hr
 @keyframes cp-icon-b { from { opacity: 0; transform: scale(0.5); } }
 [data-cp-part="ws-card"][data-cp-swap="a"] svg { animation: cp-icon-a 100ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 [data-cp-part="ws-card"][data-cp-swap="b"] svg { animation: cp-icon-b 100ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-@media (prefers-reduced-motion: reduce) { [data-cp-part="ws-card"]:is([data-cp-glide], [data-cp-swap]), [data-cp-part="ws-card"][data-cp-swap] svg { animation: none !important; } }
+@keyframes cp-swap-text-a { from { opacity: 0.35; transform: translateY(var(--cp-shift, 0px)); } }
+@keyframes cp-swap-text-b { from { opacity: 0.35; transform: translateY(var(--cp-shift, 0px)); } }
+[data-cp-part="ws-card"][data-cp-swap="a"] [dir] { animation: cp-swap-text-a 100ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+[data-cp-part="ws-card"][data-cp-swap="b"] [dir] { animation: cp-swap-text-b 100ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+@media (prefers-reduced-motion: reduce) { [data-cp-part="ws-card"]:is([data-cp-glide], [data-cp-swap]), [data-cp-part="ws-card"][data-cp-swap] :is(svg, [dir]) { animation: none !important; } }
 /* Command Center keeps its taller palette rows, inset like every other surface's. */
 [data-testid="command-center-panel"] button { margin: 0 6px !important; padding: 8px 10px !important; border-radius: 6px !important; }
 [data-testid="combobox-desktop-container"]:not([${TAG}]) > div:first-child > div { padding: 4px 12px !important; }
@@ -700,9 +704,12 @@ ${PLAN} > div:last-child { padding: 10px 16px 12px !important; border-top: 1px s
 [data-testid="chat-outline-preview"][data-cp-ghost] { pointer-events: none; animation: none !important; transition: transform 100ms cubic-bezier(0.33, 1, 0.68, 1), opacity 100ms ease-out !important; }
 [data-cp-ghost="out"] { opacity: 0; }
 @keyframes cp-outline-in { from { transform: translateY(var(--cp-from, 0px)); } }
-@keyframes cp-text-in { from { opacity: 0.2; } }
+/* Starts where the copy's dimmed text was, so the swap has no blank frame. */
+@keyframes cp-text-in { from { opacity: 0.35; transform: translateY(var(--cp-shift, 0px)); } }
 [data-testid="chat-outline-preview"][data-cp-swap] { animation: cp-outline-in 100ms cubic-bezier(0.33, 1, 0.68, 1) both !important; }
-[data-testid="chat-outline-preview"][data-cp-swap] > * { animation: cp-text-in 100ms ease-out both; }
+[data-testid="chat-outline-preview"][data-cp-swap="new"] > * { animation: cp-text-in 100ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+[data-testid="chat-outline-preview"][data-cp-ghost] > * { transition: opacity 100ms ease-out; }
+[data-testid="chat-outline-preview"][data-cp-ghost][data-cp-moved] > * { opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) { [data-testid="chat-outline-preview"]:is([data-cp-ghost], [data-cp-swap]), [data-cp-swap] > * { animation: none !important; transition: none !important; } }
 
 /* Context window hover card: caps label, big percent with a bar (from data-cp-pct), plan pill, rounded limit bars, footer under a hairline. */
@@ -1672,8 +1679,11 @@ function syncHoverCards() {
   if (target) {
     const top = cardTop(target)!;
     const session = name(target) ?? "";
-    // Another session's card: its icons pop in as it glides over.
-    if (shownCard && shownCard.name !== session) target.setAttribute("data-cp-swap", target.getAttribute("data-cp-swap") === "a" ? "b" : "a");
+    // Another session's card: its icons pop in and its text fades in trailing the glide, as it moves over.
+    if (shownCard && shownCard.name !== session) {
+      target.style.setProperty("--cp-shift", top > shownCard.top ? "-4px" : top < shownCard.top ? "4px" : "0px");
+      target.setAttribute("data-cp-swap", target.getAttribute("data-cp-swap") === "a" ? "b" : "a");
+    }
     if (shownCard) shownCard.name = session;
     if (shownCard?.el !== target || shownCard.top !== top) {
       const now = Date.now();
@@ -1708,7 +1718,7 @@ const notePointer = (event: { target: unknown }) => {
   const row = target?.closest?.(WS_ROW);
   if (row && row !== hoveredRow) (hoveredRow = row), hoverCards.size && syncHoverCards();
   overTick = target?.closest?.(OUTLINE_TICK) ?? undefined;
-  if (ghost && overTick) moveGhost(overTick);
+  if (ghost) overTick ? moveGhost(overTick) : waitGhost();
 };
 
 function watchHoverCards(roots: DomElement[]) {
@@ -1728,7 +1738,7 @@ function watchHoverCards(roots: DomElement[]) {
 const OUTLINE_PREVIEW = '[data-testid="chat-outline-preview"]';
 const OUTLINE_TICK = '[data-testid^="chat-outline-tick-"]';
 let overTick: DomElement | undefined;
-let ghost: { el: DomElement; tick: DomElement; timer?: ReturnType<typeof setTimeout> } | undefined;
+let ghost: { el: DomElement; tick: DomElement; dy: number; timer?: ReturnType<typeof setTimeout> } | undefined;
 
 function dropGhost(fade: boolean) {
   if (!ghost) return;
@@ -1740,16 +1750,20 @@ function dropGhost(fade: boolean) {
   setTimeout(() => el.remove(), 100);
 }
 
-/** Waits for Paseo's next preview while the pointer is on another tick; otherwise it has left the rail. */
+/** Waits for Paseo's next preview while the pointer is on a tick (back on its own one too); otherwise it has left the rail. */
 const waitGhost = () => {
   if (!ghost) return;
   clearTimeout(ghost.timer);
-  ghost.timer = setTimeout(() => dropGhost(true), overTick && overTick !== ghost.tick ? 400 : 60);
+  ghost.timer = setTimeout(() => dropGhost(true), overTick ? 400 : 60);
 };
 
 function moveGhost(tick: DomElement) {
   if (!ghost) return;
-  ghost.el.style.setProperty("transform", `translateY(${tick.getBoundingClientRect().top - ghost.tick.getBoundingClientRect().top}px)`);
+  ghost.dy = tick.getBoundingClientRect().top - ghost.tick.getBoundingClientRect().top;
+  ghost.el.style.setProperty("transform", `translateY(${ghost.dy}px)`);
+  // Its text dims while it stands over another tick, until that tick's preview arrives.
+  if (ghost.dy) ghost.el.setAttribute("data-cp-moved", "");
+  else ghost.el.removeAttribute("data-cp-moved");
   waitGhost();
 }
 
@@ -1765,7 +1779,7 @@ function ghostOutlinePreview(removed: Array<{ el: DomElement; from: DomElement }
   old.from.appendChild(el);
   // Style it in place first, so moving it to another tick transitions.
   el.getBoundingClientRect();
-  ghost = { el, tick };
+  ghost = { el, tick, dy: 0 };
   if (overTick) moveGhost(overTick);
   else waitGhost();
 }
@@ -1774,7 +1788,9 @@ function swapOutlinePreview(roots: DomElement[]) {
   if (!ghost) return;
   for (const el of within(roots, `${OUTLINE_PREVIEW}:not([data-cp-ghost])`)) {
     // Measured at rest: swapping first takes it out of the popover rise-in.
-    el.setAttribute("data-cp-swap", "");
+    // Another prompt's text fades in trailing the glide; the same prompt (back on its tick) just stays.
+    el.setAttribute("data-cp-swap", el.textContent === ghost.el.textContent ? "same" : "new");
+    el.style.setProperty("--cp-shift", ghost.dy > 0 ? "-4px" : ghost.dy < 0 ? "4px" : "0px");
     el.style.setProperty("--cp-from", "0px");
     el.style.setProperty("--cp-from", `${ghost.el.getBoundingClientRect().top - el.getBoundingClientRect().top}px`);
     dropGhost(false);

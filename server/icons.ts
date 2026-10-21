@@ -145,7 +145,7 @@ export function untar(tar: Buffer) {
   return files;
 }
 
-const cacheDir = () => join(process.env.PASEO_HOME || join(homedir(), ".paseo"), "plugin-cache", "paseo-chat-polish");
+export const cacheDir = () => join(process.env.PASEO_HOME || join(homedir(), ".paseo"), "plugin-cache", "paseo-chat-polish");
 const loading = new Map<IconSetName, Promise<Record<string, string>>>();
 
 /** A set's twins, Lucide name → 24px markup: from the cache, or downloaded once and cached. */

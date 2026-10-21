@@ -12,6 +12,7 @@ A [Paseo](https://paseo.sh) plugin that redraws the agent chat as one quiet colu
 - **Themes.** Pick one of Paseo's built-in themes or a Chat Polish one (Mariana, Paper, Dusk), or edit the colors with contrast checks. Fonts and sizes are set from the same page.
 - **Rich text styles.** Three or four looks each for quotes, tables, code blocks, inline code, headings, lists, callouts and rules.
 - **Diagrams.** Mermaid diagrams drawn by [Pele](https://pele.run) in the theme's colors, or by Paseo's mermaid with the same chart colors. Switch on the Rich text page, which previews both. A diagram left showing its source (Paseo's safety check rejects labels like `<id>`, or a render got stuck) has a redraw button that has Pele draw it as Paseo's own diagram, with zoom and full screen.
+- **HTML pages (experimental).** Ask an agent to chart, visualize, simulate or mock up something and it draws an interactive page right in the chat, in the theme's colors, with local images (screenshots, generated images) inlined. Before a page shows, it is laid out in Chrome (or Edge, Brave) at desktop and phone widths, and the agent fixes overlapping text, script errors or overflow it finds. Hover a page to open it full screen, in your browser, or copy its HTML. Off by default: turn it on in the dashboard's **HTML pages** tab; agents created from then on get the tool.
 - **Working indicator.** Paseo's dots, or a sparkle, spokes, dot ring, orb, matrix or snake loader.
 - **Icon sets.** Paseo's Lucide icons, or Untitled UI or Hugeicons ones across the app (desktop and web). Icons without a twin stay Lucide.
 - **Extras.** Turn recaps, ⌥⌘↑/↓ to jump between your prompts, and Command Center (⌘K) toggles.
@@ -60,7 +61,7 @@ paseo plugin add git:lthieu96/paseo-chat-polish
 Or install a specific GitHub release:
 
 ```sh
-paseo plugin add git:lthieu96/paseo-chat-polish --ref v0.4.0
+paseo plugin add git:lthieu96/paseo-chat-polish --ref v0.6.0
 ```
 
 For the reviewed Paseo Registry revision:
@@ -103,6 +104,7 @@ To update the Paseo Registry listing, submit the new GitHub tag as a revision th
 - Icon sets swap Paseo's icons by their `lucide-*` class; icons Paseo adds later fall back to Lucide until they are mapped.
 - Picking an icon set the first time needs internet (about a second); until it arrives, and offline, icons stay Lucide.
 - Pele lays diagrams out its own way and labels them in Helvetica/Arial. Mermaid's user journey keeps its own actor colors.
+- HTML pages show on desktop and web; the mobile apps name the page instead. Only agents created after the switch is on get the tool, and Open in browser needs the daemon on the same computer. The layout check needs a Chrome-family browser on the daemon host and adds about two seconds per page; without one, pages show unchecked.
 
 ## Develop
 

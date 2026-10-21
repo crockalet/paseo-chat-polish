@@ -7,6 +7,8 @@ import { recapData } from "./shared/recap";
 import { getTheme, themeSchema, themeSettings } from "./shared/theme";
 import { getIconSet, getPrefs, prefsSchema, prefsSettings } from "./shared/timeline";
 import { loadIconSet } from "./server/icons";
+import { closeLocalServer, openHtmlPage, startHtmlTool, withHtmlTool } from "./server/html";
+import { openHtml } from "./shared/html";
 import { applyUpdate, checkUpdate } from "./shared/update";
 import { checkForUpdate, installUpdate } from "./server/update";
 
@@ -24,6 +26,18 @@ export default function contribute(server: PluginServerContext) {
     return current.status === "ready" ? current.values : prefsSchema.parse({});
   });
   server.handle(getIconSet, ({ set }) => loadIconSet(set));
+  const htmlTool = () => startHtmlTool().catch((error: unknown) => (console.error("[chat-polish] html_render tool unavailable", error), undefined));
+  // Started even while the pref is off: agents created while it was on still call the tool.
+  void htmlTool();
+  server.handle(openHtml, openHtmlPage);
+  server.before("agent.create", async ({ request }) => {
+    // Off by default, so unreadable prefs mean off; internal agents (commit and PR messages) never draw.
+    const current = await prefs.read();
+    if (current.status !== "ready" || current.values.html !== "on" || request.config.internal) return undefined;
+    const tool = await htmlTool();
+    if (!tool) return undefined;
+    return { ...request, config: withHtmlTool(request.config, tool) };
+  });
   server.handle(checkUpdate, checkForUpdate);
   server.handle(applyUpdate, installUpdate);
   server.on("agent.turn_ended", async (event, { paseo }) => {
@@ -35,5 +49,5 @@ export default function contribute(server: PluginServerContext) {
     const id = `recap-${Date.now()}`;
     await paseo.agents.ref(event.agent.id).timeline.append({ type: "plugin", id, kind: "chat-polish-recap", version: 1, data });
   });
-  return () => {};
+  return () => closeLocalServer();
 }

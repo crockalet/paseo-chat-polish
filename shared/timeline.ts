@@ -65,6 +65,8 @@ export const prefsSchema = z.object({
   recap: z.enum(["on", "off"]).default("on"),
   /** Mermaid diagrams in Paseo's own replies drawn by Pele (pele.run) in the theme's colors, or by Paseo's mermaid (desktop and web, with nativeStyle "design"). */
   diagrams: z.enum(["pele", "mermaid"]).default("pele"),
+  /** New agents get an html_render tool and use it when asked for a visual; its pages show inline (desktop and web). Off until turned on (dashboard or Command Center); agents keep what they were created with. */
+  html: z.enum(["on", "off"]).default("off"),
   /** Image-only replies as thumbnails; "native" leaves them to Paseo. */
   images: z.enum(["small", "large", "native"]).default("small"),
   /** One style variant per markdown element in Paseo's own replies (desktop, with nativeStyle "design"); "a" is the base design. */

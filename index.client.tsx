@@ -14,7 +14,8 @@ import { bindThemeRegistry, currentTheme, registerTheme } from "./client/theme-r
 import { addIconSet, bindPromptKeys, clampUserMessages, iconTwins, jumpToPrompt, openAgentIds, paintSidebar, redrawDiagrams, setCompactHandler, readHostAppearance, restyleNative, selectionCopyMenu, setNativeColors, setRailProviders, setRichText, stylePluginViews, nativeIconSet, watchDom } from "./client/web";
 import { getTheme, THEME_CATALOG_ID, themeSchema } from "./shared/theme";
 import { getIconSet, getPrefs, type Prefs } from "./shared/timeline";
-import { ImagesItem, NoticeItem, PlanItem, RecapItem, StepsItem, ThoughtItem, TodoItem, ToolItem } from "./client/views";
+import { HtmlItem, ImagesItem, NoticeItem, PlanItem, RecapItem, StepsItem, ThoughtItem, TodoItem, ToolItem } from "./client/views";
+import { htmlData, htmlSchema } from "./client/html";
 import { recapSchema } from "./shared/recap";
 
 const KIND = "chat-polish";
@@ -111,6 +112,8 @@ export default function contribute(client: PluginClientContext) {
         id: `${KIND}-tool`,
         query: { itemType: "tool_call" },
         transform: ({ item, phase }) => {
+          const page = htmlData(item);
+          if (page) return one("html", page);
           const kind = hideableKind(item);
           if (kind && currentPrefs().hidden.includes(kind)) return { items: [] };
           // Like Paseo: the approval card shows a pending plan, so the call itself stays out of the chat until resolved.
@@ -239,6 +242,7 @@ export default function contribute(client: PluginClientContext) {
   client.addTimelineRenderer({ kind: `${KIND}-images`, version: 1, schema: imagesSchema, Component: ImagesItem });
   client.addTimelineRenderer({ kind: `${KIND}-steps`, version: 1, schema: stepsSchema, Component: StepsItem });
   client.addTimelineRenderer({ kind: `${KIND}-recap`, version: 1, schema: recapSchema, Component: RecapItem });
+  client.addTimelineRenderer({ kind: `${KIND}-html`, version: 1, schema: htmlSchema, Component: HtmlItem });
 
   const unbindPromptKeys = bindPromptKeys();
   for (const [id, title, direction] of [["previous-prompt", "Previous prompt", -1], ["next-prompt", "Next prompt", 1]] as const) {
@@ -276,6 +280,7 @@ export default function contribute(client: PluginClientContext) {
       ["reads", hidesReads ? "Show finished reads and searches" : "Hide finished reads and searches", "EyeOff", { hidden: hidesReads ? p.hidden.filter((h) => h !== "read" && h !== "search") : [...new Set([...p.hidden, "read", "search"] as const)] }],
       ["copy", p.selectionCopy === "on" ? "Turn off the copy popup on selected text" : "Turn on the copy popup on selected text", "ClipboardCopy", { selectionCopy: p.selectionCopy === "on" ? "off" : "on" }],
       ["recap", p.recap === "on" ? "Turn off turn recaps" : "Turn on turn recaps", "FileDiff", { recap: p.recap === "on" ? "off" : "on" }],
+      ["html", p.html === "on" ? "Stop giving new agents the HTML page tool (experimental)" : "Give new agents the HTML page tool (experimental)", "AppWindow", { html: p.html === "on" ? "off" : "on" }],
       ["diagrams", p.diagrams === "pele" ? "Draw diagrams with Paseo's mermaid" : "Draw diagrams with Pele", "Workflow", { diagrams: p.diagrams === "pele" ? "mermaid" : "pele" }],
       ["native", p.nativeStyle === "design" ? "Leave Paseo's own items as Paseo draws them" : "Restyle Paseo's own items", "Paintbrush", { nativeStyle: p.nativeStyle === "design" ? "paseo" : "design" }],
     ];

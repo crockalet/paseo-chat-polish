@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
+import { isHtmlTool } from "../shared/html.ts";
 
 // Merged steps: each run of consecutive thoughts and tool calls between replies folds into one row.
 // A transformer sees one item at a time, so the runs come from each open agent's own timeline (fetched
@@ -56,7 +57,8 @@ export function stepKey(item: Item): string | undefined {
   if (item.type === "todo") return `d:${item.items.map((t) => `${taskStatus(t)} ${t.text}`).join("\n")}`;
   if (item.type === "tool_call") {
     const name = toolName(item);
-    if (item.detail.type === "plan" || TODO_TOOLS.has(name) || name === "agent_message" || DROPPED_TOOLS.has(name)) return undefined;
+    // An html_render call never joins a run: once it completes it shows as a page, content like a reply.
+    if (item.detail.type === "plan" || TODO_TOOLS.has(name) || name === "agent_message" || DROPPED_TOOLS.has(name) || isHtmlTool(item.name)) return undefined;
     return `t:${item.callId}`;
   }
   if (item.type !== "reasoning") return undefined;

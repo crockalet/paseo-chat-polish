@@ -1145,7 +1145,7 @@ export function drawDiagram(frame: unknown, source: string, done: (size?: { widt
  * colors can't serve: themes often share a hue between them (Paseo's light accent and success are both green). A gray
  * accent still gets some chroma. Opaque hex, since mermaid derives shades from them; the browser does the color math.
  */
-function seriesFrom(accent: string) {
+export function seriesFrom(accent: string) {
   const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
   return [0, 180, 90, 270, 45, 225, 135, 315].map((turn) => {
     if (!ctx) return accent;

@@ -1,6 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useAgent, useRpc, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
-import { ScrollView, useRevealedText } from "@getpaseo/plugin/client/react-native";
+import { openExternalUrl, useAgent, useRpc, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import { copyText, ScrollView, useRevealedText, useToast } from "@getpaseo/plugin/client/react-native";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, LayoutAnimation, Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
@@ -17,6 +17,10 @@ import { Icon } from "./icons";
 import { usePrefs } from "./prefs";
 import { useCurrentTheme } from "./theme-registry";
 import { followExpansionAtBottom, readHostAppearance, type HostAppearance } from "./web";
+import type { HtmlData } from "./html";
+import { HtmlFrame, lastFrameHeight, useHovered, useHtmlTheme, windowButtonsInset } from "./html-frame";
+import { htmlPage } from "../shared/page";
+import { inlineImages, localImages, openHtml } from "../shared/html";
 
 type Colors = PluginTheme["colors"];
 const SQUIRCLE_CARD = { dataSet: { cpSquircle: "card" } } as object;
@@ -1081,6 +1085,102 @@ export function RecapItem({ item, theme }: PluginTimelineItemProps<Recap>) {
             ))}
           </View>
         </FadeIn>
+      ) : null}
+    </View>
+  );
+}
+
+/** A page an agent published with html_render. Native apps can't run its scripts in a frame, so they name it instead. */
+export function HtmlItem({ item, theme }: PluginTimelineItemProps<HtmlData>) {
+  if (Platform.OS === "web") return <HtmlPage {...item.data} theme={theme} />;
+  return (
+    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13, paddingVertical: 4 }}>{`${item.data.title}: open this chat on desktop or the web to see the page.`}</Text>
+  );
+}
+
+/** The page with the local images it names inlined, undefined while they're read; an image that can't be read keeps its path. */
+function useInlinedImages(html: string) {
+  const read = useRpc(readImage);
+  const paths = useMemo(() => [...new Set(localImages(html).map((image) => image.path))], [html]);
+  const [done, setDone] = useState<{ source: string; html: string }>();
+  useEffect(() => {
+    if (!paths.length) return;
+    let alive = true;
+    void Promise.all(paths.map((path) => loadImage(path, "original", read).then((uri) => [path, uri] as const, () => undefined))).then((entries) => {
+      if (alive) setDone({ source: html, html: inlineImages(html, new Map(entries.filter((entry) => entry !== undefined))) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [html, paths, read]);
+  if (!paths.length) return html;
+  return done?.source === html ? done.html : undefined;
+}
+
+/** The page in the chat, with full screen, open in browser and copy on hover. Full screen is a second frame, so the page starts over there. */
+function HtmlPage({ html, title, theme }: HtmlData & { theme: PluginTheme }) {
+  const page = useInlinedImages(html);
+  const c = theme.colors;
+  const css = useHtmlTheme(c);
+  const save = useRpc(openHtml);
+  const toast = useToast();
+  const box = useRef<View>(null);
+  const hovered = useHovered(box);
+  const [full, setFull] = useState(false);
+  // Esc pressed outside the page (its header, after a click on the backdrop); the page passes on its own through onEscape.
+  useEffect(() => {
+    if (!full) return;
+    const target = globalThis as unknown as KeyTarget;
+    const onKey = (e: { key: string; preventDefault(): void }) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setFull(false);
+    };
+    target.addEventListener("keydown", onKey);
+    return () => target.removeEventListener("keydown", onKey);
+  }, [full]);
+  const openInBrowser = () =>
+    save({ html: htmlPage(page ?? html, css, true) })
+      .then(({ url }) => openExternalUrl(url))
+      .catch((error: unknown) => {
+        console.warn("[chat-polish] Opening the page in the browser failed", error);
+        toast.error("Couldn't open the page in the browser.");
+      });
+  const copy = () => copyText(html).then(() => toast.show("Copied the page's HTML", { variant: "success" }), () => toast.error("Couldn't copy the HTML."));
+  const button = (icon: string, label: string, onPress: () => void) => (
+    <Pressable
+      key={icon}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ hovered: on, pressed }: { hovered?: boolean; pressed: boolean }) => ({ width: 26, height: 26, borderRadius: 6, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: c.border, backgroundColor: on || pressed ? c.surface2 : c.surface1 })}
+    >
+      <Icon name={icon} size={14} color={c.foregroundMuted} />
+    </Pressable>
+  );
+  const shared = [button("ExternalLink", "Open in browser", () => void openInBrowser()), button("Copy", "Copy HTML", () => void copy())];
+  return (
+    <View ref={box}>
+      {/* A stand-in the frame's last size while images load, so the chat doesn't move when the page arrives. */}
+      {page === undefined ? <View style={{ height: lastFrameHeight(html) }} /> : <HtmlFrame html={page} id={html} title={title} colors={c} />}
+      {/* Hidden, not removed, off hover: the buttons stay where the pointer may land, so showing them never moves what is under it. */}
+      <View pointerEvents="box-none" style={{ position: "absolute", top: 6, right: 6, flexDirection: "row", gap: 4, opacity: hovered ? 1 : 0 }}>
+        {[button("Maximize2", "Full screen", () => setFull(true)), ...shared]}
+      </View>
+      {full ? (
+        <Modal transparent visible animationType="fade" onRequestClose={() => setFull(false)}>
+          <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 48, paddingLeft: windowButtonsInset(), paddingRight: 16, borderBottomWidth: 1, borderBottomColor: c.border }}>
+              <Text style={{ flex: 1, color: c.foreground, fontSize: 13, fontWeight: "500" }} numberOfLines={1}>
+                {title}
+              </Text>
+              {[...shared, button("X", "Close full screen", () => setFull(false))]}
+            </View>
+            <View style={{ flex: 1, paddingVertical: 24, paddingHorizontal: 32 }}>
+              <HtmlFrame html={page ?? html} title={title} colors={c} fill onEscape={() => setFull(false)} />
+            </View>
+          </View>
+        </Modal>
       ) : null}
     </View>
   );

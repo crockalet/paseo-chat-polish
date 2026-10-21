@@ -14,7 +14,7 @@ import { setTodoChanges } from "./steps";
 import { PrefsOverride, setPrefs, usePrefs } from "./prefs";
 import { registerTheme, useCurrentTheme } from "./theme-registry";
 import { PLAIN_SYNTAX, SYNTAX_THEMES } from "./highlight";
-import { alpha, AppearanceOverride, CodeLine, ImagesItem, MergedSteps, PMONO, sunken, SyntaxOverride, ThoughtItem, TodoItem, ToolItem, useReducedMotion, useStyles } from "./views";
+import { alpha, AppearanceOverride, CodeLine, HtmlItem, ImagesItem, MergedSteps, PMONO, sunken, SyntaxOverride, ThoughtItem, TodoItem, ToolItem, useReducedMotion, useStyles } from "./views";
 import { canSetAppTheme, DEFAULTS, diagramDoc, drawDiagram, loadMermaidDoc, PASEO_FONT_STACKS, readHostAppearance, readSyntaxTheme, setAppTheme, updateAppSettings } from "./web";
 
 type ToolCall = Extract<AgentTimelineItem, { type: "tool_call" }>;
@@ -67,12 +67,13 @@ const CODE_REPLY = ["export function requireAuth(req, next) {", "  const token =
 // 2×2 pixels in the Mariana accents; scaled up it reads as a soft gradient screenshot.
 const PREVIEW_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAF0lEQVR4nGNIm3nm6JSjDPGbN//angwANX4Hw07OqLUAAAAASUVORK5CYII=";
 
-type Page = "theme" | "messages" | "steps" | "rich";
-const PAGES: Array<{ id: Page; icon: string; label: string; group: string }> = [
+type Page = "theme" | "messages" | "steps" | "rich" | "html";
+const PAGES: Array<{ id: Page; icon: string; label: string; group: string; badge?: string }> = [
   { id: "theme", icon: "Palette", label: "Theme", group: "APPEARANCE" },
   { id: "messages", icon: "MessageSquareText", label: "Messages", group: "CHAT" },
   { id: "steps", icon: "ListTree", label: "Steps", group: "CHAT" },
   { id: "rich", icon: "Type", label: "Rich text", group: "CHAT" },
+  { id: "html", icon: "AppWindow", label: "HTML pages", group: "CHAT", badge: "Experimental" },
 ];
 
 // ponytail: Paseo's built-in app themes, copied from Paseo 0.11.x (plugins can't read them); refresh when Paseo adds or retunes one.
@@ -418,7 +419,7 @@ function UpdateCardView({ theme, status, phase, error, onUpdate }: { theme: Plug
 function InnerNav({ theme, host, page, prefs, onSelect, onPrefs }: { theme: PluginTheme; host: string; page: Page; prefs: Prefs; onSelect(p: Page): void; onPrefs(p: Prefs): void }) {
   const s = useStyles(theme);
   const c = theme.colors;
-  const item = ({ id, icon, label }: (typeof PAGES)[number]) => {
+  const item = ({ id, icon, label, badge }: (typeof PAGES)[number]) => {
     const active = id === page;
     return (
       <Pressable
@@ -438,6 +439,8 @@ function InnerNav({ theme, host, page, prefs, onSelect, onPrefs }: { theme: Plug
       >
         <Icon name={icon} size={16} color={active ? c.foreground : c.foregroundMuted} />
         <Text style={[s.target, { color: active ? c.foreground : c.foregroundMuted, flex: 1 }]}>{label}</Text>
+        {/* The full tag would wrap the label in this column; the page's own header spells it out. */}
+        {badge ? <Icon name="FlaskConical" size={14} color={c.statusWarning} /> : null}
       </Pressable>
     );
   };
@@ -1111,11 +1114,95 @@ const RICH_DRAWINGS: Record<RichText, Array<(c: Colors) => ReactNode>> = {
   ],
 };
 
-/** Settings for one page: grouped cards (Messages, Steps) or a tile picker per markdown element (Rich text). */
+// What a user does with html_render pages, in the order they meet it.
+const HTML_GUIDE: Array<[string, string]> = [
+  ["Ask for a visual", "Ask the agent to draw, chart, visualize, simulate or mock up something, in any language. Other questions get a text answer, so pages are only made when you ask. If Chrome, Edge or Brave is installed, each page is laid out there first and the agent fixes overlapping text, script errors or overflow before you see it."],
+  ["Diagrams come as mermaid", "Flowcharts and sequence diagrams are drawn by the chat from a mermaid block, which lays them out better and costs less than a page."],
+  ["Use the page", "Hover it for Full screen (Esc closes), Open in browser and Copy HTML. Links open in your browser and app shortcuts keep working. Its scripts run in a sandbox, away from Paseo and your files."],
+  ["Find it later", "Pages are kept with the chat and show again, in the current theme, when you reopen it. Desktop and web; phones show the page's title."],
+];
+
+/** The HTML pages page: the switch for the tool, then how to use it. */
+function HtmlGuide({ theme, prefs, onChange }: { theme: PluginTheme; prefs: Prefs; onChange(p: Prefs): void }) {
+  const s = useStyles(theme);
+  return (
+    <View style={{ gap: 24 }}>
+      <Group theme={theme} title="Tool">
+        <Row theme={theme} first label="HTML pages" hint="Off by default. Gives agents created from now on the html_render tool; existing agents keep the tools they started with.">
+          <Switch theme={theme} label="HTML pages" value={prefs.html === "on"} onChange={(on) => onChange({ ...prefs, html: on ? "on" : "off" })} />
+        </Row>
+      </Group>
+      <Group theme={theme} title="How to use">
+        {HTML_GUIDE.map(([title, text], i) => (
+          <View key={title} style={{ flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: i ? StyleSheet.hairlineWidth : 0, borderTopColor: theme.colors.border }}>
+            <Text style={[s.verb, { fontSize: 13, width: 14, color: theme.colors.foregroundMuted, fontVariant: ["tabular-nums"] }]}>{i + 1}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[s.verb, { fontSize: 13 }]}>{title}</Text>
+              <Text style={[s.small, { fontSize: 12, lineHeight: 17 }]}>{text}</Text>
+            </View>
+          </View>
+        ))}
+      </Group>
+      <Notice theme={theme}>Open in browser serves the page from the computer running Paseo's daemon (127.0.0.1), so it works when that is this computer.</Notice>
+    </View>
+  );
+}
+
+// A page as an agent would write it, from the kit and theme variables the tool describes and by the layout rules: positions computed from
+// the data, the hover readout in its own fixed row, nothing that changes the page's height.
+const SAMPLE_PAGE = `<div class="stack" style="gap:16px">
+<div class="grid">
+<div class="card stat"><div class="label">Requests</div><div class="value">1.28M</div><span class="chip" style="color:var(--success)">▲ 12% vs yesterday</span></div>
+<div class="card stat"><div class="label">p95 latency</div><div class="value">184 ms</div><span class="chip" style="color:var(--success)">▼ 9%</span></div>
+<div class="card stat"><div class="label">Error rate</div><div class="value">0.42%</div><span class="chip" style="color:var(--danger)">▲ 0.1 pt</span></div>
+</div>
+<div class="card" style="padding:16px 16px 8px">
+<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>p95 latency, last 24 hours</b><span class="small muted" id="readout">Hover the chart</span></div>
+<svg id="chart" height="190" style="display:block;width:100%;margin-top:8px"></svg>
+</div>
+<div class="row"><button class="primary" id="replay">Replay</button><span class="small muted">Milliseconds, one point per hour. The 14:00 spike is a deploy.</span></div>
+</div>
+<script>
+const pts=Array.from({length:24},(_,h)=>Math.round(150+60*Math.sin((h-6)/24*2*Math.PI)+18*Math.sin(h*1.7)+(h===14?70:0)));
+const svg=document.getElementById("chart"),H=190,pad={l:36,r:8,t:8,b:24},ns="http://www.w3.org/2000/svg";let W=0;
+const el=(t,a)=>{const e=document.createElementNS(ns,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+const hour=i=>String(i).padStart(2,"0")+":00";
+function draw(animate){
+W=svg.clientWidth;svg.setAttribute("viewBox","0 0 "+W+" "+H);svg.innerHTML="";
+const max=Math.ceil(Math.max(...pts)/100)*100,x=i=>pad.l+i*(W-pad.l-pad.r)/23,y=v=>pad.t+(1-v/max)*(H-pad.t-pad.b);
+const g=el("linearGradient",{id:"fill",x1:0,y1:0,x2:0,y2:1});g.append(el("stop",{offset:0,style:"stop-color:var(--chart-1);stop-opacity:.35"}),el("stop",{offset:1,style:"stop-color:var(--chart-1);stop-opacity:0"}));const defs=el("defs",{});defs.append(g);svg.append(defs);
+for(let v=0;v<=max;v+=max/4){svg.append(el("line",{x1:pad.l,x2:W-pad.r,y1:y(v),y2:y(v),style:"stroke:var(--border)"}));const t=el("text",{x:pad.l-8,y:y(v)+4,"text-anchor":"end",style:"fill:var(--muted);font-size:11px"});t.textContent=v;svg.append(t)}
+for(let i=0;i<24;i+=6){const t=el("text",{x:x(i),y:H-6,"text-anchor":i?"middle":"start",style:"fill:var(--muted);font-size:11px"});t.textContent=hour(i);svg.append(t)}
+const line=pts.map((v,i)=>(i?"L":"M")+x(i)+" "+y(v)).join("");
+const area=el("path",{d:line+"L"+x(23)+" "+y(0)+"L"+x(0)+" "+y(0)+"Z",fill:"url(#fill)"});
+const path=el("path",{d:line,fill:"none",style:"stroke:var(--chart-1);stroke-width:2;stroke-linejoin:round"});
+const cross=el("line",{y1:pad.t,y2:H-pad.b,style:"stroke:var(--muted);stroke-dasharray:3 3;opacity:0"}),dot=el("circle",{r:4,style:"fill:var(--chart-1);stroke:var(--bg);stroke-width:2;opacity:0"});
+svg.append(area,path,cross,dot);
+if(animate&&!matchMedia("(prefers-reduced-motion: reduce)").matches){const L=path.getTotalLength();path.style.strokeDasharray=L;path.style.strokeDashoffset=L;area.style.opacity=0;path.getBoundingClientRect();path.style.transition="stroke-dashoffset 1.2s ease-out";area.style.transition="opacity .6s ease-out .8s";path.style.strokeDashoffset=0;area.style.opacity=1}
+svg.onmousemove=e=>{const r=svg.getBoundingClientRect(),i=Math.max(0,Math.min(23,Math.round((e.clientX-r.left-pad.l)/(W-pad.l-pad.r)*23)));cross.setAttribute("x1",x(i));cross.setAttribute("x2",x(i));dot.setAttribute("cx",x(i));dot.setAttribute("cy",y(pts[i]));cross.style.opacity=dot.style.opacity=1;readout.textContent=hour(i)+" · "+pts[i]+" ms"};
+svg.onmouseleave=()=>{cross.style.opacity=dot.style.opacity=0;readout.textContent="Hover the chart"};
+}
+draw(true);new ResizeObserver(()=>{if(svg.clientWidth!==W)draw(false)}).observe(svg);replay.onclick=()=>draw(true);
+</script>`;
+
+/** A sample page in the theme being edited, drawn by the same row the chat uses. */
+function HtmlPreview({ theme, draft, layout }: { theme: PluginTheme; draft: ThemeDraft; prefs: Prefs; layout: PluginScreenProps["layout"] }) {
+  const pt = previewTheme(draft, theme);
+  const s = useStyles(pt);
+  return (
+    <View style={{ gap: 12, padding: 24, borderRadius: 12, backgroundColor: pt.colors.surface0 }}>
+      <Text style={[s.small, { fontSize: 12 }]}>“Chart our API latency for the last day”</Text>
+      <HtmlItem agentId="preview" timestamp={new Date(0)} theme={pt} host={{ id: "preview", label: "Preview" }} layout={layout} item={{ type: "plugin", kind: "preview", version: 1, data: { title: "API latency", html: SAMPLE_PAGE } }} />
+    </View>
+  );
+}
+
+/** Settings for one page: grouped cards (Messages, Steps), a tile picker per markdown element (Rich text) or the HTML pages guide. */
 function PrefsEditor({ theme, page, prefs, onChange }: { theme: PluginTheme; page: Exclude<Page, "theme">; prefs: Prefs; onChange(p: Prefs): void }) {
   const set = <K extends keyof Prefs>(key: K) => (value: Prefs[K]) => onChange({ ...prefs, [key]: value });
   const s = useStyles(theme);
   const c = theme.colors;
+  if (page === "html") return <HtmlGuide theme={theme} prefs={prefs} onChange={onChange} />;
   if (page === "messages") {
     const paseoSyntax = readSyntaxTheme();
     return (
@@ -1866,12 +1953,15 @@ function RichPreview({ theme, draft, prefs, layout }: { theme: PluginTheme; draf
   );
 }
 
-function TopBar({ theme, layout, title, subtitle, children }: { theme: PluginTheme; layout: PluginScreenProps["layout"]; title: string; subtitle: string; children?: ReactNode }) {
+function TopBar({ theme, layout, title, badge, subtitle, children }: { theme: PluginTheme; layout: PluginScreenProps["layout"]; title: string; badge?: string; subtitle: string; children?: ReactNode }) {
   const s = useStyles(theme);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: layout.compact ? 16 : 32, paddingVertical: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border }}>
       <View style={{ flex: 1, gap: 4 }}>
-        <Text style={[s.title, { fontSize: 20 }]}>{title}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={[s.title, { fontSize: 20 }]}>{title}</Text>
+          {badge ? <Badge theme={theme} label={badge} tone={theme.colors.statusWarning} /> : null}
+        </View>
         <Text style={[s.small, { fontSize: 13 }]}>{subtitle}</Text>
       </View>
       {children}
@@ -2024,6 +2114,7 @@ const PAGE_SUBTITLES: Record<Exclude<Page, "theme">, string> = {
   messages: "Your messages, images in replies and the working indicator.",
   steps: "The thoughts and tool calls between two replies.",
   rich: "One style per markdown element in replies. Click a tile to switch.",
+  html: "Charts, tables, simulations and mockups agents draw in the chat when you ask.",
 };
 
 /** Timeline prefs save as you pick; open chats pick them up for new rows. */
@@ -2036,10 +2127,10 @@ function PrefsPage({ theme, layout, page, settings, change }: Pick<PluginScreenP
   const s = useStyles(theme);
   const failed = !!settings.saveError;
   const status = failed ? `Save failed: ${String(settings.saveError)}` : settings.saving ? "Saving…" : "Saved automatically";
-  const PagePreview = page === "rich" ? RichPreview : Preview;
+  const PagePreview = page === "rich" ? RichPreview : page === "html" ? HtmlPreview : Preview;
   return (
     <>
-      <TopBar theme={theme} layout={layout} title={PAGES.find((p) => p.id === page)!.label} subtitle={PAGE_SUBTITLES[page]}>
+      <TopBar theme={theme} layout={layout} title={PAGES.find((p) => p.id === page)!.label} badge={PAGES.find((p) => p.id === page)!.badge} subtitle={PAGE_SUBTITLES[page]}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}>
           <Icon name={failed ? "TriangleAlert" : "Check"} size={13} color={failed ? c.statusDanger : c.statusSuccess} />
           <Text style={[s.small, { fontSize: 12, color: failed ? c.statusDanger : c.foregroundMuted }]} numberOfLines={1}>

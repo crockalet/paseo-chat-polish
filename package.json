@@ -28,9 +28,7 @@
     "shared/"
   ],
   "scripts": {
-    "pretypecheck": "node server/prepare-image.mjs",
     "typecheck": "tsc --noEmit",
-    "pretest": "node server/prepare-image.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
